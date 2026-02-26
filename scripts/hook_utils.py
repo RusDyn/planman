@@ -1,0 +1,262 @@
+"""Shared evaluation helpers for planman hooks (PostToolUse + Stop).
+
+Contains the common evaluation flow:
+  detect plan -> load state -> check round limit -> assess -> format output
+
+Used by both post_tool_hook.py (plan mode) and stop_hook.py (inline plans).
+"""
+
+import fcntl
+import json
+import os
+import sys
+import time
+from datetime import datetime, timezone
+
+from config import load_config
+from evaluator import check_codex_installed, evaluate_plan
+from state import (
+    clear_state,
+    load_state,
+    record_feedback,
+    save_state,
+    update_for_plan,
+)
+
+# Path for recent-evaluation marker (prevents double-eval by Stop hook)
+_RECENT_EVAL_PATH = os.path.join("/tmp", "planman-recent-eval.json")
+_RECENT_EVAL_TTL = 10  # seconds
+
+
+def _log_to_file(msg, cwd):
+    """Append a timestamped message to planman.log (race-safe)."""
+    if cwd:
+        log_path = os.path.join(cwd, ".claude", "planman.log")
+    else:
+        log_path = os.path.join("/tmp", "planman.log")
+    try:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                ts = datetime.now(timezone.utc).isoformat()
+                f.write(f"[{ts}] {msg}\n")
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    except Exception:
+        pass  # Never crash on log failure
+
+
+def log(msg, config, cwd=None):
+    """Log to stderr if verbose; also append to planman.log file."""
+    if config.verbose:
+        print(f"[planman] {msg}", file=sys.stderr)
+        _log_to_file(msg, cwd)
+
+
+def format_feedback(data, threshold, round_num, max_rounds, first_round=False):
+    """Format evaluation result into human-readable feedback."""
+    score = data["score"]
+    breakdown = data["breakdown"]
+    weaknesses = data.get("weaknesses", [])
+    suggestions = data.get("suggestions", [])
+    strengths = data.get("strengths", [])
+
+    if first_round:
+        header = (
+            f"**First-round review** — your plan scored **{score}/10**. "
+            f"Round 1/{max_rounds}."
+        )
+    else:
+        header = (
+            f"Your plan scored **{score}/10** (needs {threshold}). "
+            f"Round {round_num}/{max_rounds}."
+        )
+
+    lines = [
+        header,
+        "",
+        f"**Breakdown**: completeness={breakdown['completeness']}/2, "
+        f"correctness={breakdown['correctness']}/2, "
+        f"sequencing={breakdown['sequencing']}/2, "
+        f"risk_awareness={breakdown['risk_awareness']}/2, "
+        f"clarity={breakdown['clarity']}/2",
+    ]
+
+    if strengths:
+        lines.append("")
+        lines.append("**Strengths:**")
+        for s in strengths:
+            lines.append(f"- {s}")
+
+    if weaknesses:
+        lines.append("")
+        lines.append("**Issues:**")
+        for w in weaknesses:
+            lines.append(f"- {w}")
+
+    if suggestions:
+        lines.append("")
+        lines.append("**Suggestions:**")
+        for s in suggestions:
+            lines.append(f"- {s}")
+
+    lines.append("")
+    if first_round:
+        lines.append("Revise your plan and resubmit.")
+    else:
+        lines.append("Revise your plan addressing these issues.")
+
+    return "\n".join(lines)
+
+
+def format_approval(data):
+    """Format approval message."""
+    score = data["score"]
+    strengths = data.get("strengths", [])
+
+    lines = [f"Plan approved (score: {score}/10)."]
+    if strengths:
+        lines.append("")
+        lines.append("**Strengths:**")
+        for s in strengths[:3]:
+            lines.append(f"- {s}")
+    return "\n".join(lines)
+
+
+def mark_recent_evaluation(session_id):
+    """Write a marker so the Stop hook can skip double-evaluation."""
+    try:
+        with open(_RECENT_EVAL_PATH, "w") as f:
+            json.dump({"session_id": session_id, "timestamp": time.time()}, f)
+    except OSError:
+        pass
+
+
+def was_recently_evaluated():
+    """Check if a plan was recently evaluated by PostToolUse hook."""
+    try:
+        with open(_RECENT_EVAL_PATH, "r") as f:
+            data = json.load(f)
+        ts = data.get("timestamp", 0)
+        if time.time() - ts < _RECENT_EVAL_TTL:
+            return True
+    except (OSError, json.JSONDecodeError, KeyError):
+        pass
+    return False
+
+
+def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
+    """Run the full plan evaluation flow.
+
+    Returns a dict with keys:
+        action: "pass" | "block" | "skip"
+        reason: str or None (for block)
+        system_message: str or None
+    """
+    # Empty text — skip
+    if not plan_text or not plan_text.strip():
+        return {"action": "skip", "reason": None, "system_message": None}
+
+    # Load state and update round counter
+    state = load_state(session_id)
+    state = update_for_plan(state, plan_text, plan_path)
+    log(f"round {state['round_count']}/{config.max_rounds}", config, cwd)
+
+    # Check round limit — block for human decision
+    if state["round_count"] > config.max_rounds:
+        log("max rounds exceeded — blocking for human decision", config, cwd)
+        clear_state(session_id)
+        return {
+            "action": "block",
+            "reason": (
+                f"Planman: Max evaluation rounds ({config.max_rounds}) reached. "
+                f"Last score was {state.get('last_score', '?')}/10. "
+                "The plan has not met the quality threshold after multiple revisions. "
+                "Please review and decide whether to proceed."
+            ),
+            "system_message": None,
+        }
+
+    # Assess via codex
+    previous_feedback = state.get("last_feedback")
+    result, error = evaluate_plan(
+        plan_text, config, previous_feedback, state["round_count"], cwd=cwd
+    )
+
+    if error:
+        log(f"evaluation error: {error}", config, cwd)
+        if config.fail_open:
+            return {
+                "action": "pass",
+                "reason": None,
+                "system_message": f"Planman: Evaluation failed ({error}). Passing through (fail-open).",
+            }
+        else:
+            return {
+                "action": "block",
+                "reason": f"Planman evaluation failed: {error}. Set PLANMAN_FAIL_OPEN=true to pass through on errors.",
+                "system_message": None,
+            }
+
+    assessment_score = result["score"]
+    is_plan_flag = result.get("is_plan", True)
+
+    # Non-plan text — pass through without touching state
+    if not is_plan_flag:
+        log("LLM classified as non-plan — passing through", config, cwd)
+        return {"action": "pass", "reason": None, "system_message": None}
+
+    # Only mark evaluation AFTER confirming it's a plan
+    mark_recent_evaluation(session_id)
+
+    # First-round mandatory rejection
+    if state["round_count"] == 1:
+        feedback_text = format_feedback(
+            result, config.threshold, state["round_count"], config.max_rounds, first_round=True
+        )
+        state = record_feedback(state, assessment_score, feedback_text, result.get("breakdown"))
+        try:
+            save_state(state)
+        except OSError as e:
+            log(f"failed to save state: {e}", config, cwd)
+        log(f"first round: mandatory review ({assessment_score}/10)", config, cwd)
+        return {
+            "action": "block",
+            "reason": feedback_text,
+            "system_message": (
+                f"Planman: First-round review ({assessment_score}/10). "
+                f"Revision required. Round 1/{config.max_rounds}."
+            ),
+        }
+
+    if assessment_score >= config.threshold:
+        # Plan passes (round >= 2)
+        log(f"plan accepted: {assessment_score}/10", config, cwd)
+        clear_state(session_id)
+        log("session state cleared", config, cwd)
+        return {
+            "action": "pass",
+            "reason": None,
+            "system_message": f"Planman: {format_approval(result)}",
+        }
+    else:
+        # Plan rejected
+        feedback_text = format_feedback(
+            result, config.threshold, state["round_count"], config.max_rounds
+        )
+        state = record_feedback(state, assessment_score, feedback_text, result.get("breakdown"))
+        try:
+            save_state(state)
+        except OSError as e:
+            log(f"failed to save state: {e}", config, cwd)
+
+        log(f"plan rejected: {assessment_score}/{config.threshold}", config, cwd)
+        return {
+            "action": "block",
+            "reason": feedback_text,
+            "system_message": (
+                f"Planman: Plan rejected ({assessment_score}/10, threshold {config.threshold}). "
+                f"Round {state['round_count']}/{config.max_rounds}."
+            ),
+        }
