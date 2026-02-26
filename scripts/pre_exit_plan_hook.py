@@ -143,7 +143,7 @@ def _main():
 
     log(f"evaluating plan from {plan_path}", config, cwd)
 
-    # Run evaluation (mark_recent_evaluation is handled inside run_evaluation after is_plan check)
+    # Run evaluation
     result = run_evaluation(
         plan_text, session_id, config, cwd=cwd, plan_path=plan_path
     )

@@ -201,12 +201,6 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
             }
 
     assessment_score = result["score"]
-    is_plan_flag = result.get("is_plan", True)
-
-    # Non-plan text — pass through without touching state (safety valve)
-    if not is_plan_flag:
-        log("LLM classified as non-plan — passing through", config, cwd)
-        return {"action": "pass", "reason": None, "system_message": None}
 
     # First-round mandatory rejection
     if state["round_count"] == 1:

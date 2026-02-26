@@ -100,10 +100,10 @@ def evaluate_plan(plan_text, config, previous_feedback=None, round_number=1, cwd
     if config.verbose:
         print(f"[planman] codex exit code: {result.returncode}", file=sys.stderr)
         if result.stderr:
-            print(f"[planman] codex stderr: {result.stderr[:500]}", file=sys.stderr)
+            print(f"[planman] codex stderr: {result.stderr[:2000]}", file=sys.stderr)
 
     if result.returncode != 0:
-        stderr_snippet = (result.stderr or "")[:200]
+        stderr_snippet = (result.stderr or "")[:1000]
         return None, f"codex exec failed (exit {result.returncode}): {stderr_snippet}"
 
     return parse_codex_output(result.stdout)

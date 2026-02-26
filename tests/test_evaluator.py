@@ -46,7 +46,6 @@ VALID_RESULT = {
     "weaknesses": ["Missing rollback plan"],
     "suggestions": ["Add error handling for step 3"],
     "strengths": ["Clear step ordering", "Good file references"],
-    "is_plan": True,
 }
 
 
@@ -111,28 +110,6 @@ class TestParseCodexOutput(unittest.TestCase):
         result, error = parse_codex_output(json.dumps(data))
         self.assertIsNone(result)
         self.assertIn("breakdown.completeness", error)
-
-
-class TestIsPlanField(unittest.TestCase):
-    def test_valid_output_with_is_plan(self):
-        stdout = json.dumps(VALID_RESULT)
-        result, error = parse_codex_output(stdout)
-        self.assertIsNone(error)
-        self.assertTrue(result["is_plan"])
-
-    def test_missing_is_plan_accepted(self):
-        """is_plan is optional — missing field is accepted."""
-        data = dict(VALID_RESULT)
-        del data["is_plan"]
-        result, error = parse_codex_output(json.dumps(data))
-        self.assertIsNone(error)
-        self.assertNotIn("is_plan", result)
-
-    def test_is_plan_false(self):
-        data = dict(VALID_RESULT, is_plan=False)
-        result, error = parse_codex_output(json.dumps(data))
-        self.assertIsNone(error)
-        self.assertFalse(result["is_plan"])
 
 
 class TestEvaluatePlan(unittest.TestCase):

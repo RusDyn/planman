@@ -23,7 +23,6 @@ VALID_RESULT = {
     "weaknesses": ["Minor: missing rollback plan"],
     "suggestions": ["Add error handling"],
     "strengths": ["Clear ordering"],
-    "is_plan": True,
 }
 
 LOW_SCORE_RESULT = {
@@ -38,22 +37,6 @@ LOW_SCORE_RESULT = {
     "weaknesses": ["Steps out of order"],
     "suggestions": ["Reorder steps"],
     "strengths": ["Good references"],
-    "is_plan": True,
-}
-
-NOT_A_PLAN_RESULT = {
-    "score": 1,
-    "breakdown": {
-        "completeness": 0,
-        "correctness": 0,
-        "sequencing": 0,
-        "risk_awareness": 0,
-        "clarity": 1,
-    },
-    "weaknesses": [],
-    "suggestions": [],
-    "strengths": [],
-    "is_plan": False,
 }
 
 PLAN_TEXT = "# My Plan\n1. Do X\n2. Do Y\n3. Do Z"
@@ -193,18 +176,6 @@ class TestRunEvaluation(unittest.TestCase):
         r3 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/b.md")
         self.assertEqual(r3["action"], "block")
         self.assertIn("First-round", r3["reason"])
-
-    @patch("hook_utils.evaluate_plan")
-    def test_not_a_plan_passes_through(self, mock_eval):
-        """is_plan=false → pass (safety valve), no state modification."""
-        from hook_utils import run_evaluation
-        mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
-        config = _make_config()
-
-        result = run_evaluation("Some code output", self._session_id, config, plan_path="/test.md")
-        self.assertEqual(result["action"], "pass")
-        self.assertIsNone(result["reason"])
-        self.assertIsNone(result["system_message"])
 
     @patch("hook_utils.evaluate_plan")
     def test_contract_pass_fields(self, mock_eval):
@@ -433,7 +404,6 @@ class TestScoreMismatchAccepted(unittest.TestCase):
             "weaknesses": [],
             "suggestions": [],
             "strengths": ["Good plan"],
-            "is_plan": True,
         }
         mock_eval.return_value = (mismatched_result, None)
         config = _make_config(threshold=7)

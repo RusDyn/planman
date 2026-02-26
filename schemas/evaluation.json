@@ -58,10 +58,6 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "What the plan does well. Reinforces good practices."
-    },
-    "is_plan": {
-      "type": "boolean",
-      "description": "Is this text an implementation plan? false for non-plan content (code, explanations, conversation, status updates)."
     }
   },
   "required": ["score", "breakdown", "weaknesses", "suggestions", "strengths"],
