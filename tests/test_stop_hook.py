@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+from config import Config
 from state import clear_state, _state_path
 
 VALID_RESULT = {
@@ -89,9 +90,27 @@ Here's my plan to add authentication:
 """
 
 
+def _make_config(**overrides):
+    defaults = {
+        "threshold": 7,
+        "max_rounds": 3,
+        "model": "",
+        "fail_open": True,
+        "enabled": True,
+        "rubric": "Score it 1-10.",
+        "codex_path": "codex",
+        "verbose": False,
+        "timeout": 90,
+        "stress_test": False,
+        "stress_test_prompt": "Stress-test default prompt",
+    }
+    defaults.update(overrides)
+    return Config(**defaults)
+
+
 def _clear_recent_eval_marker():
     """Remove the recent-evaluation marker file to prevent cross-test interference."""
-    marker_path = os.path.join("/tmp", "planman-recent-eval.json")
+    marker_path = os.path.join(tempfile.gettempdir(), "planman-recent-eval.json")
     try:
         os.unlink(marker_path)
     except OSError:
@@ -109,6 +128,7 @@ class TestStopHookIntegration(unittest.TestCase):
                 self._env_saved[k] = os.environ.pop(k)
         os.environ["PLANMAN_ENABLED"] = "true"
         os.environ["PLANMAN_VERBOSE"] = "false"
+        os.environ["PLANMAN_STRESS_TEST"] = "false"
         _clear_recent_eval_marker()
         # Reset evaluator cache
         import evaluator
@@ -179,29 +199,18 @@ class TestStopHookIntegration(unittest.TestCase):
     @patch("hook_utils.evaluate_plan")
     @patch("stop_hook.check_codex_installed", return_value=True)
     def test_plan_passes_threshold(self, mock_check, mock_eval, mock_recent):
-        """Plan needs 2 rounds: round 1 = mandatory rejection, round 2 = approval."""
+        """Stop hook: score >= threshold → immediate approval (no multi-round)."""
         mock_eval.return_value = (VALID_RESULT, None)
         transcript = _make_transcript(PLAN_TEXT)
         try:
-            # Round 1: mandatory first-round rejection
-            output1, code1 = self._run_hook({
+            output, code = self._run_hook({
                 "session_id": self._session_id,
                 "transcript_path": transcript,
             })
-            self.assertEqual(code1, 0)
-            parsed1 = json.loads(output1)
-            self.assertEqual(parsed1["decision"], "block")
-            self.assertIn("First-round review", parsed1["reason"])
-
-            # Round 2: approval
-            output2, code2 = self._run_hook({
-                "session_id": self._session_id,
-                "transcript_path": transcript,
-            })
-            self.assertEqual(code2, 0)
-            parsed2 = json.loads(output2)
-            self.assertIn("systemMessage", parsed2)
-            self.assertIn("approved", parsed2["systemMessage"].lower())
+            self.assertEqual(code, 0)
+            parsed = json.loads(output)
+            self.assertIn("systemMessage", parsed)
+            self.assertIn("approved", parsed["systemMessage"].lower())
         finally:
             os.unlink(transcript)
 
@@ -209,15 +218,10 @@ class TestStopHookIntegration(unittest.TestCase):
     @patch("hook_utils.evaluate_plan")
     @patch("stop_hook.check_codex_installed", return_value=True)
     def test_plan_rejected_below_threshold(self, mock_check, mock_eval, mock_recent):
+        """Stop hook: score < threshold → block with feedback (no multi-round)."""
         mock_eval.return_value = (LOW_SCORE_RESULT, None)
         transcript = _make_transcript(PLAN_TEXT)
         try:
-            # Round 1: first-round rejection
-            self._run_hook({
-                "session_id": self._session_id,
-                "transcript_path": transcript,
-            })
-            # Round 2: rejected on score
             output, code = self._run_hook({
                 "session_id": self._session_id,
                 "transcript_path": transcript,
@@ -226,32 +230,28 @@ class TestStopHookIntegration(unittest.TestCase):
             parsed = json.loads(output)
             self.assertEqual(parsed["decision"], "block")
             self.assertIn("4/10", parsed["reason"])
-            self.assertIn("needs 7", parsed["reason"])
         finally:
             os.unlink(transcript)
 
     @patch("stop_hook.was_recently_evaluated", return_value=False)
     @patch("hook_utils.evaluate_plan")
     @patch("stop_hook.check_codex_installed", return_value=True)
-    def test_max_rounds_exceeded(self, mock_check, mock_eval, mock_recent):
-        os.environ["PLANMAN_MAX_ROUNDS"] = "1"
+    def test_repeated_stop_hook_no_round_accumulation(self, mock_check, mock_eval, mock_recent):
+        """Stop hook does NOT accumulate rounds — no max-rounds enforcement."""
         mock_eval.return_value = (LOW_SCORE_RESULT, None)
         transcript = _make_transcript(PLAN_TEXT)
+        os.environ["PLANMAN_MAX_ROUNDS"] = "1"
         try:
-            # Round 1: first-round rejection (mandatory)
-            self._run_hook({
-                "session_id": self._session_id,
-                "transcript_path": transcript,
-            })
-            # Round 2: over limit → block for human decision
-            output, code = self._run_hook({
-                "session_id": self._session_id,
-                "transcript_path": transcript,
-            })
-            self.assertEqual(code, 0)
-            parsed = json.loads(output)
-            self.assertEqual(parsed["decision"], "block")
-            self.assertIn("Max evaluation rounds", parsed["reason"])
+            # Call stop hook multiple times — should always block on score, never on max-rounds
+            for _ in range(3):
+                output, code = self._run_hook({
+                    "session_id": self._session_id,
+                    "transcript_path": transcript,
+                })
+                self.assertEqual(code, 0)
+                parsed = json.loads(output)
+                self.assertEqual(parsed["decision"], "block")
+                self.assertNotIn("Max evaluation rounds", parsed.get("reason", ""))
         finally:
             os.unlink(transcript)
 
@@ -332,6 +332,7 @@ class TestStopHookActive(unittest.TestCase):
             if k.startswith("PLANMAN_"):
                 self._env_saved[k] = os.environ.pop(k)
         os.environ["PLANMAN_ENABLED"] = "true"
+        os.environ["PLANMAN_STRESS_TEST"] = "false"
         import evaluator
         evaluator.reset_codex_cache()
 
@@ -365,6 +366,7 @@ class TestLastAssistantMessage(unittest.TestCase):
                 self._env_saved[k] = os.environ.pop(k)
         os.environ["PLANMAN_ENABLED"] = "true"
         os.environ["PLANMAN_VERBOSE"] = "false"
+        os.environ["PLANMAN_STRESS_TEST"] = "false"
         _clear_recent_eval_marker()
         import evaluator
         evaluator.reset_codex_cache()
@@ -394,24 +396,14 @@ class TestLastAssistantMessage(unittest.TestCase):
     def test_uses_last_assistant_message_when_present(self, mock_check, mock_eval, mock_recent):
         """When last_assistant_message is provided, it should be used directly."""
         mock_eval.return_value = (VALID_RESULT, None)
-        # Round 1: mandatory rejection
-        output1, code1 = self._run_hook({
+        output, code = self._run_hook({
             "session_id": self._session_id,
             "last_assistant_message": PLAN_TEXT,
         })
-        self.assertEqual(code1, 0)
-        parsed1 = json.loads(output1)
-        self.assertEqual(parsed1["decision"], "block")
-
-        # Round 2: approval
-        output2, code2 = self._run_hook({
-            "session_id": self._session_id,
-            "last_assistant_message": PLAN_TEXT,
-        })
-        self.assertEqual(code2, 0)
-        parsed2 = json.loads(output2)
-        self.assertIn("systemMessage", parsed2)
-        self.assertIn("approved", parsed2["systemMessage"].lower())
+        self.assertEqual(code, 0)
+        parsed = json.loads(output)
+        self.assertIn("systemMessage", parsed)
+        self.assertIn("approved", parsed["systemMessage"].lower())
 
     @patch("stop_hook.was_recently_evaluated", return_value=False)
     @patch("hook_utils.evaluate_plan")
@@ -421,12 +413,6 @@ class TestLastAssistantMessage(unittest.TestCase):
         mock_eval.return_value = (VALID_RESULT, None)
         transcript = _make_transcript(PLAN_TEXT)
         try:
-            # Round 1: mandatory rejection
-            self._run_hook({
-                "session_id": self._session_id,
-                "transcript_path": transcript,
-            })
-            # Round 2: approval
             output, code = self._run_hook({
                 "session_id": self._session_id,
                 "transcript_path": transcript,
@@ -447,13 +433,6 @@ class TestLastAssistantMessage(unittest.TestCase):
         # Transcript has different text (non-plan)
         transcript = _make_transcript("Done! The file has been updated.")
         try:
-            # Round 1
-            self._run_hook({
-                "session_id": self._session_id,
-                "last_assistant_message": PLAN_TEXT,
-                "transcript_path": transcript,
-            })
-            # Round 2: approval
             output, code = self._run_hook({
                 "session_id": self._session_id,
                 "last_assistant_message": PLAN_TEXT,
@@ -505,6 +484,7 @@ class TestConcisePlan(unittest.TestCase):
                 self._env_saved[k] = os.environ.pop(k)
         os.environ["PLANMAN_ENABLED"] = "true"
         os.environ["PLANMAN_VERBOSE"] = "false"
+        os.environ["PLANMAN_STRESS_TEST"] = "false"
         _clear_recent_eval_marker()
         import evaluator
         evaluator.reset_codex_cache()
@@ -529,7 +509,11 @@ class TestConcisePlan(unittest.TestCase):
     @patch("hook_utils.evaluate_plan")
     @patch("stop_hook.check_codex_installed", return_value=True)
     def test_concise_plan_reaches_evaluation(self, mock_check, mock_eval):
-        """Short but valid plan (~60 chars) reaches LLM, gets first-round rejection."""
+        """Short but valid plan (~60 chars) reaches LLM and gets evaluated.
+
+        Stop-hook uses classify-only path: no first-round rejection.
+        VALID_RESULT has score=8 >= threshold=7, so it passes.
+        """
         concise_plan = "# Fix\n1. Edit X\n2. Test"
         mock_eval.return_value = (VALID_RESULT, None)
         output, code = self._run_hook({
@@ -539,8 +523,9 @@ class TestConcisePlan(unittest.TestCase):
         self.assertEqual(code, 0)
         mock_eval.assert_called_once()
         parsed = json.loads(output)
-        self.assertEqual(parsed["decision"], "block")
-        self.assertIn("First-round review", parsed["reason"])
+        # Stop-hook classify-only: score 8 >= threshold 7 → approved
+        self.assertIn("systemMessage", parsed)
+        self.assertIn("Plan approved", parsed["systemMessage"])
 
 
 class TestContractActions(unittest.TestCase):
@@ -554,6 +539,7 @@ class TestContractActions(unittest.TestCase):
                 self._env_saved[k] = os.environ.pop(k)
         os.environ["PLANMAN_ENABLED"] = "true"
         os.environ["PLANMAN_VERBOSE"] = "false"
+        os.environ["PLANMAN_STRESS_TEST"] = "false"
         _clear_recent_eval_marker()
         import evaluator
         evaluator.reset_codex_cache()
@@ -654,6 +640,7 @@ class TestVerboseSystemMessage(unittest.TestCase):
                 self._env_saved[k] = os.environ.pop(k)
         os.environ["PLANMAN_ENABLED"] = "true"
         os.environ["PLANMAN_VERBOSE"] = "true"
+        os.environ["PLANMAN_STRESS_TEST"] = "false"
         _clear_recent_eval_marker()
         import evaluator
         evaluator.reset_codex_cache()
@@ -721,6 +708,164 @@ class TestVerboseSystemMessage(unittest.TestCase):
         })
         self.assertEqual(code, 0)
         self.assertEqual(output, "")
+
+
+class TestCrossHookIntegration(unittest.TestCase):
+    """Cross-hook integration tests: plan-mode + stop hook interaction."""
+
+    def setUp(self):
+        self._session_id = f"test-cross-{os.getpid()}-{id(self)}"
+        self._env_saved = {}
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                self._env_saved[k] = os.environ.pop(k)
+        os.environ["PLANMAN_ENABLED"] = "true"
+        os.environ["PLANMAN_VERBOSE"] = "false"
+        os.environ["PLANMAN_STRESS_TEST"] = "false"
+        _clear_recent_eval_marker()
+        import evaluator
+        evaluator.reset_codex_cache()
+
+    def tearDown(self):
+        clear_state(self._session_id)
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                del os.environ[k]
+        os.environ.update(self._env_saved)
+
+    def _run_hook(self, hook_input):
+        import stop_hook
+        stdin_data = json.dumps(hook_input)
+        stdout_capture = StringIO()
+        with patch("sys.stdin", StringIO(stdin_data)), \
+             patch("sys.stdout", stdout_capture), \
+             self.assertRaises(SystemExit) as ctx:
+            stop_hook.main()
+        return stdout_capture.getvalue(), ctx.exception.code
+
+    @patch("hook_utils.evaluate_plan")
+    @patch("stop_hook.check_codex_installed", return_value=True)
+    def test_stop_hook_skips_during_active_plan_mode(self, mock_check, mock_eval):
+        """Plan-mode saves state with plan_file_path, stop hook fires and skips."""
+        from state import load_state, save_state, update_for_plan
+
+        # Simulate plan-mode evaluation (sets plan_file_path)
+        state = load_state(self._session_id)
+        state = update_for_plan(state, PLAN_TEXT, plan_path="/plan.md")
+        save_state(state)
+
+        # Stop hook fires - should skip without calling evaluate_plan
+        output, code = self._run_hook({
+            "session_id": self._session_id,
+            "last_assistant_message": PLAN_TEXT,
+        })
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "")
+        mock_eval.assert_not_called()
+
+        # Verify state unchanged
+        state_after = load_state(self._session_id)
+        self.assertEqual(state_after["round_count"], 1)
+
+    @patch("stop_hook.was_recently_evaluated", return_value=False)
+    @patch("hook_utils.evaluate_plan")
+    @patch("stop_hook.check_codex_installed", return_value=True)
+    def test_stop_hook_resumes_after_plan_approval(self, mock_check, mock_eval, mock_recent):
+        """Plan approved (state cleared), stop hook fires and resumes normal behavior."""
+        from state import load_state, save_state, update_for_plan
+
+        # Simulate plan-mode round 1
+        state = load_state(self._session_id)
+        state = update_for_plan(state, PLAN_TEXT, plan_path="/plan.md")
+        save_state(state)
+
+        # Plan approved - clear state
+        clear_state(self._session_id)
+
+        # Stop hook fires - should proceed normally (no plan_file_path in fresh state)
+        mock_eval.return_value = (VALID_RESULT, None)
+        output, code = self._run_hook({
+            "session_id": self._session_id,
+            "last_assistant_message": PLAN_TEXT,
+        })
+        self.assertEqual(code, 0)
+        # LLM was called (stop hook proceeded)
+        mock_eval.assert_called_once()
+
+    @patch("hook_utils.evaluate_plan")
+    def test_cross_hook_round_progression(self, mock_eval):
+        """Full 3-cycle: plan-mode round 1, stop hook (no corruption), plan-mode round 2, etc."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (LOW_SCORE_RESULT, None)
+        config = _make_config(max_rounds=3)
+
+        # Plan-mode round 1
+        r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/a.md")
+        self.assertEqual(r1["action"], "block")
+
+        from state import load_state
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 1)
+
+        # Simulate stop hook firing (no plan_path)
+        # Should be guarded: plan_file_path is set and fresh
+        r_stop1 = run_evaluation(PLAN_TEXT, self._session_id, config)
+        # Guard in update_for_plan preserves state, but run_evaluation still runs
+        # The round_count should NOT have been corrupted
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 1)
+
+        # Plan-mode round 2
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/a.md")
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 2)
+
+        # Stop hook fires again (no corruption)
+        run_evaluation(PLAN_TEXT, self._session_id, config)
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 2)
+
+        # Plan-mode round 3
+        r3 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/a.md")
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 3)
+
+    @patch("hook_utils.evaluate_plan")
+    def test_cross_hook_with_stress_test(self, mock_eval):
+        """Same 3-cycle with stress_test=true."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (LOW_SCORE_RESULT, None)
+        config = _make_config(max_rounds=3, stress_test=True)
+
+        # Plan-mode round 1 (stress-test: skip codex, reject)
+        r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/a.md")
+        self.assertEqual(r1["action"], "block")
+        mock_eval.assert_not_called()  # stress-test skips codex on round 1
+
+        from state import load_state
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 1)
+
+        # Stop hook fires (guarded)
+        run_evaluation(PLAN_TEXT, self._session_id, config)
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 1)
+
+        # Plan-mode round 2 (codex called now)
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/a.md")
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 2)
+        mock_eval.assert_called_once()  # first real codex call
+
+        # Stop hook fires (guarded)
+        run_evaluation(PLAN_TEXT, self._session_id, config)
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 2)
+
+        # Plan-mode round 3
+        r3 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/a.md")
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 3)
 
 
 if __name__ == "__main__":

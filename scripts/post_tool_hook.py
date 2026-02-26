@@ -18,10 +18,12 @@ PostToolUse output: empty (always allows the write through)
 import json
 import os
 import sys
+import tempfile
 import time
+from pathlib import PurePath
 
 # Session marker path template
-_MARKER_TEMPLATE = os.path.join("/tmp", "planman-plan-{session_id}.json")
+_MARKER_TEMPLATE = os.path.join(tempfile.gettempdir(), "planman-plan-{session_id}.json")
 
 
 def _safe_session_id(session_id):
@@ -51,8 +53,14 @@ def _main():
     tool_input = hook_input.get("tool_input", {})
     file_path = tool_input.get("file_path", "")
 
-    # Only track plan files (.claude/plans/)
-    if "/.claude/plans/" not in file_path:
+    # Only track plan files (.claude/plans/) — segment check for cross-platform
+    parts = PurePath(file_path).parts
+    lower_parts = tuple(p.casefold() for p in parts)
+    try:
+        idx = lower_parts.index(".claude")
+        if idx + 1 >= len(lower_parts) or lower_parts[idx + 1] != "plans":
+            sys.exit(0)
+    except ValueError:
         sys.exit(0)
 
     # Record plan file path for the PreToolUse(ExitPlanMode) hook
@@ -61,7 +69,7 @@ def _main():
 
     try:
         marker = {"plan_file_path": file_path, "timestamp": time.time()}
-        with open(marker_path, "w") as f:
+        with open(marker_path, "w", encoding="utf-8") as f:
             json.dump(marker, f)
     except OSError as e:
         print(f"[planman] warning: failed to write plan marker: {e}", file=sys.stderr)

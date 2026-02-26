@@ -32,7 +32,7 @@ No API keys needed — Codex uses your ChatGPT subscription.
 
 ## Configuration
 
-Settings are loaded from env vars (highest priority) or `.claude/planman.json`:
+Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 
 | Setting | Env Var | Default | Description |
 |---------|---------|---------|-------------|
@@ -45,16 +45,25 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.json`:
 | `codex_path` | `PLANMAN_CODEX_PATH` | `codex` | Path to codex binary |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
 | `timeout` | `PLANMAN_TIMEOUT` | `90` | Seconds for codex subprocess |
+| `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt |
+| `stress_test_prompt` | `PLANMAN_STRESS_TEST_PROMPT` | *(built-in)* | Custom first-round rejection message |
 
-### Example `.claude/planman.json`
+### Quick Start
 
-```json
+Run `/planman:init` to create `.claude/planman.jsonc` with all settings and descriptions.
+
+### Example `.claude/planman.jsonc`
+
+```jsonc
 {
+  // Minimum score to pass (default: 7)
   "threshold": 8,
   "max_rounds": 2,
   "verbose": true
 }
 ```
+
+When `stress_test` is enabled, `max_rounds` is automatically clamped to a minimum of 2.
 
 ## Tips
 
@@ -66,5 +75,7 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.json`:
 
 ## Commands
 
-- `/planman` — Show status and effective configuration
-- `/planman-help` — This help page
+- `/planman:status` — Show status and effective configuration
+- `/planman:help` — This help page
+- `/planman:init` — Create `.claude/planman.jsonc` with all defaults
+- `/planman:clear` — Clear session state (reset evaluation rounds)

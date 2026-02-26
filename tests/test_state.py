@@ -199,17 +199,19 @@ class TestUpdateForPlan(unittest.TestCase):
         self.assertEqual(state["round_count"], 1)
         self.assertIn("plan_fingerprint", state)
 
-    def test_plan_path_to_inline_transition_resets(self):
-        """Prior state has plan_file_path but no plan_fingerprint, new eval has no plan_path → round 1."""
+    def test_plan_path_to_inline_transition_preserves_during_active_session(self):
+        """Prior state has plan_file_path, no plan_path in new eval, session fresh → preserve round count."""
         state = {
             "session_id": "test",
             "round_count": 3,
             "plan_hash": compute_plan_hash("old"),
             "plan_file_path": "/a.md",
+            "last_eval_time": __import__("time").time(),
             # no plan_fingerprint
         }
         state = update_for_plan(state, "# Inline Plan\n1. Step")
-        self.assertEqual(state["round_count"], 1)
+        # Guard prevents stop hook from corrupting plan-mode round counter
+        self.assertEqual(state["round_count"], 3)
 
     def test_stale_session_resets(self):
         """last_eval_time > 30 min ago → round 1."""
@@ -258,6 +260,40 @@ class TestUpdateForPlan(unittest.TestCase):
         self.assertEqual(state["round_count"], 4)
 
 
+    def test_plan_mode_sets_fingerprint_on_new_file(self):
+        """plan_path provided → plan_fingerprint is set."""
+        state = {"session_id": "test", "round_count": 0, "plan_hash": None}
+        state = update_for_plan(state, "# My Plan\n1. Do X", plan_path="/a.md")
+        self.assertIn("plan_fingerprint", state)
+        self.assertTrue(state["plan_fingerprint"].startswith("# My Plan|"))
+
+    def test_plan_mode_sets_fingerprint_on_revision(self):
+        """Same plan_path (revision) → plan_fingerprint is updated."""
+        state = {
+            "session_id": "test",
+            "round_count": 1,
+            "plan_hash": compute_plan_hash("old"),
+            "plan_file_path": "/a.md",
+            "plan_fingerprint": "old|00000000",
+        }
+        state = update_for_plan(state, "# Revised Plan\n1. New step", plan_path="/a.md")
+        self.assertEqual(state["round_count"], 2)
+        self.assertTrue(state["plan_fingerprint"].startswith("# Revised Plan|"))
+
+    def test_stale_plan_mode_allows_stop_hook_reset(self):
+        """plan_file_path set but session stale (>30 min) → stop hook can reset."""
+        state = {
+            "session_id": "test",
+            "round_count": 3,
+            "plan_hash": compute_plan_hash("old"),
+            "plan_file_path": "/a.md",
+            "last_eval_time": __import__("time").time() - _STALE_TTL - 1,
+        }
+        state = update_for_plan(state, "# New Plan\n1. Step")
+        # Stale session → guard releases → stop hook resets to 1
+        self.assertEqual(state["round_count"], 1)
+
+
 class TestRecordFeedback(unittest.TestCase):
     def test_records_score_and_feedback(self):
         state = {"session_id": "test"}
@@ -296,6 +332,35 @@ class TestIsStale(unittest.TestCase):
     def test_stale(self):
         import time
         self.assertTrue(_is_stale({"last_eval_time": time.time() - _STALE_TTL - 1}))
+
+    def test_corrupted_string_value(self):
+        """Non-numeric last_eval_time must not crash."""
+        self.assertFalse(_is_stale({"last_eval_time": "corrupted"}))
+
+    def test_corrupted_list_value(self):
+        self.assertFalse(_is_stale({"last_eval_time": [1, 2, 3]}))
+
+    def test_corrupted_bool_value(self):
+        """bool is subclass of int — should not crash."""
+        # bool(True) == 1, so time.time() - True > _STALE_TTL → True (epoch 1s)
+        self.assertTrue(_is_stale({"last_eval_time": True}))
+
+    def test_none_explicit(self):
+        self.assertFalse(_is_stale({"last_eval_time": None}))
+
+
+class TestSaveStateNanRejection(unittest.TestCase):
+    def test_nan_score_rejected(self):
+        """save_state must reject NaN values (invalid JSON)."""
+        state = {"session_id": "test-nan", "last_score": float("nan")}
+        with self.assertRaises(ValueError):
+            save_state(state)
+
+    def test_infinity_score_rejected(self):
+        """save_state must reject Infinity values (invalid JSON)."""
+        state = {"session_id": "test-inf", "last_score": float("inf")}
+        with self.assertRaises(ValueError):
+            save_state(state)
 
 
 class TestStatePath(unittest.TestCase):

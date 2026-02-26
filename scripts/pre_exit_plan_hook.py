@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import sys
+import tempfile
 import time
 
 # Add scripts directory to path for sibling imports
@@ -32,7 +33,7 @@ from evaluator import check_codex_installed
 from hook_utils import log, run_evaluation
 
 # Session marker path template (written by post_tool_hook.py)
-_MARKER_TEMPLATE = os.path.join("/tmp", "planman-plan-{session_id}.json")
+_MARKER_TEMPLATE = os.path.join(tempfile.gettempdir(), "planman-plan-{session_id}.json")
 
 
 def _safe_session_id(session_id):
@@ -68,7 +69,7 @@ def _find_plan_file(session_id, cwd):
 
     # Primary: read session marker left by PostToolUse(Write)
     try:
-        with open(marker_path, "r") as f:
+        with open(marker_path, "r", encoding="utf-8") as f:
             marker = json.load(f)
         plan_path = marker.get("plan_file_path", "")
         if plan_path and os.path.isfile(plan_path):

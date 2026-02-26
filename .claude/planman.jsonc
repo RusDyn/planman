@@ -1,0 +1,26 @@
+// Planman configuration
+// Docs: /planman:help | All settings are optional — defaults shown below
+{
+  // Minimum score (0-10) to pass
+  "threshold": 7,
+  // Evaluation rounds before you decide (1-100)
+  "max_rounds": 3,
+  // Override Codex model (empty = codex default)
+  "model": "",
+  // Pass through if Codex fails
+  "fail_open": true,
+  // Master switch
+  "enabled": true,
+  // Custom evaluation rubric (empty = built-in)
+  "custom_rubric": "",
+  // Path to codex binary
+  "codex_path": "codex",
+  // Debug output to stderr + log file
+  "verbose": true,
+  // Seconds for codex subprocess (1-600)
+  "timeout": 90,
+  // Auto-reject first plan for deep revision (skips Codex on round 1)
+  "stress_test": true,
+  // Custom first-round rejection message (empty = built-in)
+  "stress_test_prompt": ""
+}

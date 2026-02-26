@@ -1,12 +1,13 @@
 """Configuration loader for planman.
 
 Loads settings from two sources (env vars override file):
-  1. .claude/planman.json (project-level)
+  1. .claude/planman.jsonc (project-level, supports // comments)
   2. PLANMAN_* environment variables (highest priority)
 """
 
 import json
 import os
+import re
 
 DEFAULT_RUBRIC = """\
 Score the plan on these 5 criteria (0-2 each, 10 max):
@@ -21,6 +22,12 @@ The overall score MUST equal the sum of the 5 breakdown scores.
 Be strict — a score of 7+ means the plan is ready to execute as-is.\
 """
 
+DEFAULT_STRESS_TEST_PROMPT = """\
+Stress-test this plan. Run a deep research pass with an agents team of researchers. \
+Find the weak spots, fix them, assume this plan is a 6/10 right now, make it a 10/10. \
+Don't think about implementation complexity and hours, focus on value.\
+"""
+
 DEFAULTS = {
     "threshold": 7,
     "max_rounds": 3,
@@ -31,6 +38,8 @@ DEFAULTS = {
     "codex_path": "codex",
     "verbose": False,
     "timeout": 90,
+    "stress_test": False,
+    "stress_test_prompt": "",
 }
 
 _BOOL_TRUTHY = {"true", "1", "yes", "on"}
@@ -77,6 +86,8 @@ class Config:
         "codex_path",
         "verbose",
         "timeout",
+        "stress_test",
+        "stress_test_prompt",
     )
 
     def __init__(self, **kwargs):
@@ -89,19 +100,33 @@ class Config:
         self.codex_path = kwargs.get("codex_path", DEFAULTS["codex_path"])
         self.verbose = kwargs.get("verbose", DEFAULTS["verbose"])
         self.timeout = kwargs.get("timeout", DEFAULTS["timeout"])
+        self.stress_test = kwargs.get("stress_test", DEFAULTS["stress_test"])
+        self.stress_test_prompt = kwargs.get("stress_test_prompt", "") or DEFAULT_STRESS_TEST_PROMPT
+
+
+def _strip_jsonc_comments(text):
+    """Strip // line comments from JSONC text, preserving strings."""
+    return re.sub(
+        r'("(?:[^"\\]|\\.)*")|//[^\n]*',
+        lambda m: m.group(1) if m.group(1) else "",
+        text,
+    )
 
 
 def _load_file_config():
-    """Load .claude/planman.json if it exists."""
-    path = os.path.join(".claude", "planman.json")
+    """Load .claude/planman.jsonc (or .json fallback) if it exists."""
+    path = os.path.join(".claude", "planman.jsonc")
+    if not os.path.isfile(path):
+        path = os.path.join(".claude", "planman.json")
     if not os.path.isfile(path):
         return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            raw = f.read()
+        data = json.loads(_strip_jsonc_comments(raw))
         if isinstance(data, dict):
             return data
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, ValueError):
         pass
     return {}
 
@@ -119,6 +144,8 @@ def _load_env_overrides():
         "PLANMAN_CODEX_PATH": ("codex_path", str),
         "PLANMAN_VERBOSE": ("verbose", _coerce_bool),
         "PLANMAN_TIMEOUT": ("timeout", _coerce_int),
+        "PLANMAN_STRESS_TEST": ("stress_test", _coerce_bool),
+        "PLANMAN_STRESS_TEST_PROMPT": ("stress_test_prompt", str),
     }
     for env_var, (key, coerce) in env_map.items():
         val = os.environ.get(env_var)
@@ -156,6 +183,13 @@ def load_config():
     # Validate codex_path
     merged["codex_path"] = _validate_codex_path(merged["codex_path"])
 
+    # Coerce stress_test to bool
+    merged["stress_test"] = _coerce_bool(merged["stress_test"], "stress_test")
+
+    # Guard: stress-test needs at least 2 rounds
+    if merged["stress_test"] and merged["max_rounds"] < 2:
+        merged["max_rounds"] = 2
+
     # Build Config, mapping custom_rubric to rubric
     return Config(
         threshold=merged["threshold"],
@@ -167,4 +201,6 @@ def load_config():
         codex_path=merged["codex_path"],
         verbose=merged["verbose"],
         timeout=merged["timeout"],
+        stress_test=merged["stress_test"],
+        stress_test_prompt=merged.get("stress_test_prompt", ""),
     )

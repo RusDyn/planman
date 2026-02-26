@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import tempfile
 import unittest
 from io import StringIO
 from unittest.mock import patch
@@ -40,7 +41,7 @@ class TestPostToolHookIntegration(unittest.TestCase):
         os.environ["PLANMAN_ENABLED"] = "true"
         os.environ["PLANMAN_VERBOSE"] = "false"
         # Clean up any leftover marker
-        self._marker_path = f"/tmp/planman-plan-{self._session_id}.json"
+        self._marker_path = os.path.join(tempfile.gettempdir(), f"planman-plan-{self._session_id}.json")
         self._cleanup_marker()
 
     def tearDown(self):

@@ -1,6 +1,6 @@
 """Multi-round session state tracking.
 
-State file per session at /tmp/planman-{session_id}.json.
+State file per session at <tempdir>/planman-{session_id}.json.
 Tracks round count, last score/feedback, and plan hash for change detection.
 """
 
@@ -61,9 +61,9 @@ def save_state(state):
     )
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
+            json.dump(state, f, indent=2, allow_nan=False)
         os.replace(tmp_path, path)
-    except OSError:
+    except (OSError, ValueError):
         # Best-effort cleanup
         try:
             os.unlink(tmp_path)
@@ -84,9 +84,12 @@ def clear_state(session_id):
 def _is_stale(state):
     """Return True if last evaluation was long enough ago to indicate a new planning context."""
     last_time = state.get("last_eval_time")
-    if last_time is None:
+    if not isinstance(last_time, (int, float)):
         return False
-    return (time.time() - last_time) > _STALE_TTL
+    try:
+        return (time.time() - last_time) > _STALE_TTL
+    except (TypeError, ValueError):
+        return False
 
 
 def _compute_plan_fingerprint(plan_text):
@@ -128,7 +131,11 @@ def update_for_plan(state, plan_text, plan_path=None):
     if plan_path and plan_path != state.get("plan_file_path"):
         # Plan-mode: different file (or first file) = new plan
         state["round_count"] = 1
+        state["plan_fingerprint"] = _compute_plan_fingerprint(plan_text)
     elif not plan_path:
+        # Active plan-mode session: don't let stop hook corrupt round counter
+        if state.get("plan_file_path") and not _is_stale(state):
+            return state
         # Stop-hook path: fingerprint = title + prefix hash
         new_fp = _compute_plan_fingerprint(plan_text)
         old_fp = state.get("plan_fingerprint")
@@ -146,6 +153,7 @@ def update_for_plan(state, plan_text, plan_path=None):
     else:
         # Plan-mode: same file = revision
         state["round_count"] = state.get("round_count", 0) + 1
+        state["plan_fingerprint"] = _compute_plan_fingerprint(plan_text)
 
     state["plan_hash"] = new_hash
     state["last_eval_time"] = time.time()

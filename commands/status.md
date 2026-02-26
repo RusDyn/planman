@@ -26,8 +26,9 @@ Run these commands and report the results:
    print(f'verbose:    {c.verbose}')
    print(f'timeout:    {c.timeout}s')
    print(f'rubric:     {\"custom\" if c.rubric != __import__(\"config\").DEFAULT_RUBRIC else \"built-in\"}')
+   print(f'stress_test: {c.stress_test}')
    "
    ```
-3. Check for active sessions: `ls /tmp/planman-*.json 2>/dev/null || echo "No active sessions"`
+3. Check for active sessions: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/clear_state.py list`
 
 Format the output as a clean status report.

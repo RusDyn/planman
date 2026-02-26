@@ -30,6 +30,7 @@ from config import load_config
 from evaluator import check_codex_installed
 from hook_utils import log, run_evaluation, was_recently_evaluated
 from plan_detector import extract_last_assistant_text
+from state import load_state, _is_stale
 
 
 def _output(decision, reason=None, system_message=None):
@@ -81,8 +82,10 @@ def _main():
         log("codex CLI not installed — passing through", config, cwd)
         sys.exit(0)
 
+    session_id = hook_input.get("session_id", "default")
+
     # Skip if PostToolUse hook already evaluated this plan recently
-    if was_recently_evaluated():
+    if was_recently_evaluated(session_id):
         log("plan was recently evaluated by PostToolUse hook — skipping", config, cwd)
         sys.exit(0)
 
@@ -99,7 +102,12 @@ def _main():
         log("no assistant text found", config, cwd)
         sys.exit(0)
 
-    session_id = hook_input.get("session_id", "default")
+    # Skip if plan-mode already owns this session
+    state = load_state(session_id)
+    if state.get("plan_file_path") and not _is_stale(state):
+        log("plan-mode session active — skipping stop hook", config, cwd)
+        sys.exit(0)
+
     result = run_evaluation(plan_text, session_id, config, cwd=cwd)
 
     action = result["action"]

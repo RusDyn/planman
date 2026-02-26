@@ -99,7 +99,7 @@ Then restart Claude Code.
 
 ## Configuration
 
-Settings are loaded from env vars (highest priority) or `.claude/planman.json`:
+Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 
 | Setting | Env Var | Default | Description |
 |---------|---------|---------|-------------|
@@ -112,16 +112,18 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.json`:
 | `codex_path` | `PLANMAN_CODEX_PATH` | `codex` | Path to codex binary (rejects `..` paths) |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
 | `timeout` | `PLANMAN_TIMEOUT` | `90` | Seconds for codex subprocess (1-600; keep ≤ 90s, hook timeout is 120s) |
+| `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt (skips Codex on round 1) |
+| `stress_test_prompt` | `PLANMAN_STRESS_TEST_PROMPT` | *(built-in)* | Custom first-round rejection message |
 
-### Example `.claude/planman.json`
+When `stress_test` is enabled, `max_rounds` is automatically clamped to a minimum of 2.
 
-```json
-{
-  "threshold": 8,
-  "max_rounds": 2,
-  "verbose": true
-}
+### Quick Start
+
 ```
+/planman:init
+```
+
+Creates `.claude/planman.jsonc` with all available settings and their defaults. Edit the values you want to change — omitted or empty string values use built-in defaults.
 
 ## Scoring Rubric
 
@@ -143,7 +145,7 @@ Override the built-in rubric for domain-specific evaluation:
 export PLANMAN_RUBRIC="Score the plan focusing on security implications, test coverage, and backwards compatibility. Be strict about migration safety."
 ```
 
-Or in `.claude/planman.json`:
+Or in `.claude/planman.jsonc`:
 
 ```json
 {
@@ -155,9 +157,10 @@ Or in `.claude/planman.json`:
 
 | Command | Description |
 |---------|-------------|
-| `/planman` | Show status, codex version, effective config |
-| `/planman-help` | Full usage guide |
-| `/planman-clear` | Clear session state (reset evaluation rounds) |
+| `/planman:status` | Show status, codex version, effective config |
+| `/planman:help` | Full usage guide |
+| `/planman:init` | Create `.claude/planman.jsonc` with all defaults |
+| `/planman:clear` | Clear session state (reset evaluation rounds) |
 
 ## Multi-Round Behavior
 
@@ -176,10 +179,10 @@ Or in `.claude/planman.json`:
 
 ## State Files
 
-Session state: `/tmp/planman-{session_id}.json`
+Session state is stored in the system temp directory (run `python3 -c "import tempfile; print(tempfile.gettempdir())"` to find it).
 - Tracks round count, last score, and previous feedback
 - Cleared when plan passes or session ends
-- Safe to delete: `rm /tmp/planman-*.json`
+- Safe to delete: run `/planman:clear`
 
 ## Plugin Structure
 
@@ -187,19 +190,24 @@ Session state: `/tmp/planman-{session_id}.json`
 - `.claude-plugin/plugin.json` — plugin definition (hooks, commands, schemas)
 - `scripts/` — hook implementation (Python, stdlib only)
 - `schemas/` — JSON output schema for codex structured output
-- `commands/` — slash commands (`/planman`, `/planman-help`, `/planman-clear`)
+- `commands/` — slash commands (`/planman:status`, `/planman:help`, `/planman:init`, `/planman:clear`)
 
 ## Troubleshooting
 
 ### "Nothing happens" when Claude presents a plan
 
-1. **Check planman is installed**: Run `/planman` — it should show status and config
-2. **Enable verbose mode**: Set `PLANMAN_VERBOSE=true` in your env or `.claude/planman.json`
+1. **Check planman is installed**: Run `/planman:status` — it should show status and config
+2. **Enable verbose mode**: Set `PLANMAN_VERBOSE=true` in your env or `.claude/planman.jsonc`
 3. **Check threshold**: A threshold of `0` disables evaluation. Set `PLANMAN_THRESHOLD=1` for testing
 
 ### I set `PLANMAN_VERBOSE=true` but see no output
 
 Planman logs to stderr, which Claude Code only shows in its own verbose mode (`Ctrl+O`). With `PLANMAN_VERBOSE=true`, planman also emits a `systemMessage` visible in the chat (e.g., "Planman: not a plan (score 2/6)") so you can confirm it's running without `Ctrl+O`.
+
+### Windows: "python3 not found"
+
+On Windows, Python may be registered as `python` instead of `python3`.
+Fix: create an alias, add `python3` to your PATH, or ensure Git for Windows includes Python.
 
 ### Manual testing
 
