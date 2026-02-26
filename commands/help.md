@@ -10,7 +10,7 @@ Show the user the following help information:
 
 ## What is Planman?
 
-Planman is a Claude Code plugin that evaluates your implementation plans before you approve them. It uses **OpenAI Codex CLI** as an external evaluator — when Claude presents a plan, Planman intercepts it, sends it to Codex for scoring, and rejects low-scoring plans with actionable feedback. Claude then revises and re-presents. After a configurable number of rounds, you decide.
+Planman is a Claude Code plugin that evaluates your implementation plans before you approve them. It uses **OpenAI Codex CLI** as an external evaluator — when Claude exits plan mode, Planman intercepts the ExitPlanMode call, sends the plan to Codex for scoring, and rejects low-scoring plans with actionable feedback. Claude then revises and re-presents. After a configurable number of rounds, you decide.
 
 ## Prerequisites
 
@@ -22,13 +22,15 @@ No API keys needed — Codex uses your ChatGPT subscription.
 
 ## How It Works
 
-1. Claude finishes responding (Stop hook fires)
-2. Planman checks if the response looks like a plan (local heuristics, microseconds)
-3. If it's a plan, sends it to `codex exec` for evaluation
+1. Claude writes a plan to `.claude/plans/` (PostToolUse(Write) records the path)
+2. Claude calls ExitPlanMode to present the plan
+3. Planman intercepts ExitPlanMode and sends the plan to `codex exec` for evaluation
 4. Codex scores the plan on 5 criteria (completeness, correctness, sequencing, risk awareness, clarity)
-5. Score >= threshold (default 7/10): Plan passes, you see an approval message
-6. Score < threshold: Plan is rejected with specific feedback, Claude revises
+5. **Round 1**: Mandatory review — plan always gets scored feedback, regardless of score
+6. **Round 2+**: Score >= threshold (default 7/10) → plan passes. Below → rejected with feedback, Claude revises
 7. After max rounds (default 3): You decide whether to proceed
+
+**Plan-mode only.** Files in `.claude/plans/` are deterministically treated as plans — no LLM-based detection.
 
 ## Configuration
 

@@ -8,59 +8,27 @@ When Claude presents an implementation plan, planman intercepts it, sends it to 
 
 ## How It Works
 
-Planman uses **two hooks** to catch plans in different scenarios:
+Planman uses **two hooks** in a plan-mode-only architecture:
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ Plan Mode (primary path)                                 │
-│                                                          │
-│ Claude writes plan to .claude/plans/                     │
-│         │                                                │
-│         ▼                                                │
-│   ┌──────────────┐                                       │
-│   │ PostToolUse  │  ◄── Fires when Write tool completes  │
-│   │ (Write)      │      BEFORE user sees the plan        │
-│   └──────┬───────┘                                       │
-│          │                                               │
-│          ▼                                               │
-│   ┌──────────────┐                                       │
-│   │ Is it a      │  ◄── Local heuristics (microseconds)  │
-│   │ plan?        │                                       │
-│   └──┬───────┬───┘                                       │
-│    No│     Yes│                                          │
-│      │       ▼                                           │
-│      │  ┌───────────┐                                    │
-│      │  │ codex     │  ◄── Structured JSON scoring       │
-│      │  │ exec      │                                    │
-│      │  └──┬────┬───┘                                    │
-│      │  Pass│ Fail│                                      │
-│      ▼     ▼    ▼                                        │
-│   Allow  Allow  Block + feedback                         │
-│                   │                                      │
-│                   ▼                                      │
-│             Claude revises plan file                     │
-│             (loop up to N rounds)                        │
-└──────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────┐
-│ Inline Plans (fallback path)                             │
-│                                                          │
-│ Claude presents plan in regular response                 │
-│         │                                                │
-│         ▼                                                │
-│   ┌──────────────┐                                       │
-│   │ Stop Hook    │  ◄── Fires when Claude finishes turn  │
-│   │ fires        │      (skipped if PostToolUse ran)     │
-│   └──────┬───────┘                                       │
-│          │                                               │
-│          ▼                                               │
-│    Same flow: detect plan → codex exec → pass/block      │
-└──────────────────────────────────────────────────────────┘
+PostToolUse(Write) — records plan file path when Claude writes to .claude/plans/
+  │
+  ▼
+PreToolUse(ExitPlanMode) — evaluates plan via codex when Claude exits plan mode
+  │
+  ├── Round 1: mandatory review — plan always gets scored feedback
+  │     │
+  │     ▼
+  │   Claude revises plan based on feedback
+  │     │
+  │     ▼
+  ├── Round 2+: passes if score >= threshold; rejected with feedback otherwise
+  │     │
+  │     ▼
+  └── Max rounds exceeded → you decide whether to proceed
 ```
 
-**Loop prevention:** If another Stop hook already blocked the current turn (`stop_hook_active`), planman passes through to prevent infinite block-revise loops.
-
-**Double-eval prevention:** If the PostToolUse hook already evaluated a plan, the Stop hook skips evaluation to avoid duplicate work.
+**Deterministic:** Files in `.claude/plans/` are always treated as plans — no LLM-based plan detection.
 
 ## Prerequisites
 
@@ -164,31 +132,41 @@ Or in `.claude/planman.jsonc`:
 
 ## Multi-Round Behavior
 
-- **Round 1**: Plan evaluated, feedback given if below threshold
-- **Round 2+**: Previous feedback included in evaluation (tracks improvement)
-- **Plan rewrite detected**: If Claude substantially rewrites the plan, round counter resets
-- **Max rounds exceeded**: Plan passes through with a note — you decide
+- **Round 1**: Mandatory review — plan always gets scored feedback, regardless of score
+- **Round 2+**: Passes if score >= threshold; rejected with feedback otherwise
+- **New plan file detected**: If Claude switches to a different plan file, round counter resets
+- **Max rounds exceeded**: Plan blocks with a note — you decide whether to proceed
 
 ## Zero Friction Design
 
 - **No API keys** — uses ChatGPT subscription via `codex` CLI
-- **No Python dependencies** — stdlib only (Python 3.8+)
+- **No pip dependencies** — stdlib only (Python 3.8+)
 - **Fail-open by default** — Codex errors never block your workflow
 - **Auto-detect codex** — if `codex` isn't installed, hook silently passes through
-- **Local plan detection** — no external call to decide if it's a plan (microseconds)
+- **Plan-mode only** — deterministic detection via `.claude/plans/` path
 
 ## State Files
 
 Session state is stored in the system temp directory (run `python3 -c "import tempfile; print(tempfile.gettempdir())"` to find it).
 - Tracks round count, last score, and previous feedback
-- Cleared when plan passes or session ends
-- Safe to delete: run `/planman:clear`
+- Cleared when a plan passes evaluation or via `/planman:clear`
+- Sessions are considered stale after 30 minutes of inactivity
+- Safe to delete manually
 
 ## Plugin Structure
 
 - `.claude-plugin/marketplace.json` — marketplace registry (used by `/plugin marketplace add`)
 - `.claude-plugin/plugin.json` — plugin definition (hooks, commands, schemas)
+- `hooks/hooks.json` — two hooks: PostToolUse(Write) + PreToolUse(ExitPlanMode)
 - `scripts/` — hook implementation (Python, stdlib only)
+  - `post_tool_hook.py` — records plan file path
+  - `pre_exit_plan_hook.py` — evaluates plan via codex
+  - `hook_utils.py` — shared evaluation logic
+  - `evaluator.py` — codex subprocess wrapper
+  - `state.py` — multi-round session state
+  - `config.py` — configuration loader
+  - `clear_state.py` — session cleanup utility
+  - `run_hook.py` — hook entry point
 - `schemas/` — JSON output schema for codex structured output
 - `commands/` — slash commands (`/planman:status`, `/planman:help`, `/planman:init`, `/planman:clear`)
 
@@ -211,20 +189,10 @@ Fix: create an alias, add `python3` to your PATH, or ensure Git for Windows incl
 
 ### Manual testing
 
-Test the PostToolUse hook (plan mode) by piping JSON to stdin:
+Test the PostToolUse hook (plan file tracking) by piping JSON to stdin:
 
 ```bash
 echo '{"tool_name":"Write","tool_input":{"file_path":"/home/user/.claude/plans/test.md","content":"## Plan\n1. Step 1\n2. Step 2\n3. Step 3"},"session_id":"test"}' | python3 /path/to/planman/scripts/post_tool_hook.py
-```
-
-Test the Stop hook (inline plans) by piping JSON with a transcript file:
-
-```bash
-# Create a test transcript
-echo '{"role":"assistant","content":"## Implementation Plan\n\nHere'\''s my plan:\n\n1. Create `src/auth.ts`\n2. Add JWT validation in `src/jwt.ts`\n3. Implement session management\n4. Update `src/routes.ts`\n5. Add error handling\n\n### Step 1\n- Create middleware\n- Add token extraction"}' > /tmp/test-transcript.jsonl
-
-# Run stop hook
-echo '{"session_id":"test","transcript_path":"/tmp/test-transcript.jsonl"}' | python3 /path/to/planman/scripts/stop_hook.py
 ```
 
 Replace `/path/to/planman` with the installed plugin path (check `/hooks` output for the exact location).

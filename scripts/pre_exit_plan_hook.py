@@ -67,12 +67,16 @@ def _find_plan_file(session_id, cwd):
     safe_id = _safe_session_id(session_id)
     marker_path = _MARKER_TEMPLATE.format(session_id=safe_id)
 
+    _MAX_PLAN_SIZE = 1_000_000  # 1 MB — reject absurdly large files
+
     # Primary: read session marker left by PostToolUse(Write)
     try:
         with open(marker_path, "r", encoding="utf-8") as f:
             marker = json.load(f)
         plan_path = marker.get("plan_file_path", "")
         if plan_path and os.path.isfile(plan_path):
+            if os.path.getsize(plan_path) > _MAX_PLAN_SIZE:
+                return None, None
             with open(plan_path, "r", encoding="utf-8") as f:
                 text = f.read()
             if text.strip():
@@ -88,6 +92,8 @@ def _find_plan_file(session_id, cwd):
             if md_files:
                 latest = max(md_files, key=os.path.getmtime)
                 try:
+                    if os.path.getsize(latest) > _MAX_PLAN_SIZE:
+                        return None, None
                     with open(latest, "r", encoding="utf-8") as f:
                         text = f.read()
                     if text.strip():
@@ -115,8 +121,8 @@ def _main():
     # Extract context early so log() can write to project-local file
     cwd = hook_input.get("cwd")
 
-    # Load config
-    config = load_config()
+    # Load config (pass cwd so file config resolves from project root, not hook cwd)
+    config = load_config(cwd=cwd)
 
     if not config.enabled:
         log("disabled via config", config, cwd)

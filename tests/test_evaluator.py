@@ -120,24 +120,19 @@ class TestIsPlanField(unittest.TestCase):
         self.assertIsNone(error)
         self.assertTrue(result["is_plan"])
 
-    def test_missing_is_plan(self):
+    def test_missing_is_plan_accepted(self):
+        """is_plan is optional — missing field is accepted."""
         data = dict(VALID_RESULT)
         del data["is_plan"]
         result, error = parse_codex_output(json.dumps(data))
-        self.assertIsNone(result)
-        self.assertIn("missing", error.lower())
+        self.assertIsNone(error)
+        self.assertNotIn("is_plan", result)
 
     def test_is_plan_false(self):
         data = dict(VALID_RESULT, is_plan=False)
         result, error = parse_codex_output(json.dumps(data))
         self.assertIsNone(error)
         self.assertFalse(result["is_plan"])
-
-    def test_is_plan_non_boolean(self):
-        data = dict(VALID_RESULT, is_plan="yes")
-        result, error = parse_codex_output(json.dumps(data))
-        self.assertIsNone(result)
-        self.assertIn("is_plan", error)
 
 
 class TestEvaluatePlan(unittest.TestCase):

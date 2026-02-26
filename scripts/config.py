@@ -18,7 +18,7 @@ Score the plan on these 5 criteria (0-2 each, 10 max):
 4. **Risk Awareness** (0-2): Does the plan identify edge cases, failure modes, or risks?
 5. **Clarity** (0-2): Are steps specific and actionable? Could a developer follow them?
 
-The overall score MUST equal the sum of the 5 breakdown scores.
+The overall score should reflect the sum of the 5 breakdown scores.
 Be strict — a score of 7+ means the plan is ready to execute as-is.\
 """
 
@@ -113,11 +113,12 @@ def _strip_jsonc_comments(text):
     )
 
 
-def _load_file_config():
+def _load_file_config(cwd=None):
     """Load .claude/planman.jsonc (or .json fallback) if it exists."""
-    path = os.path.join(".claude", "planman.jsonc")
+    base = cwd or "."
+    path = os.path.join(base, ".claude", "planman.jsonc")
     if not os.path.isfile(path):
-        path = os.path.join(".claude", "planman.json")
+        path = os.path.join(base, ".claude", "planman.json")
     if not os.path.isfile(path):
         return {}
     try:
@@ -157,12 +158,12 @@ def _load_env_overrides():
     return overrides
 
 
-def load_config():
+def load_config(cwd=None):
     """Load config: defaults < file < env vars."""
     merged = dict(DEFAULTS)
 
     # Layer 1: file config
-    file_cfg = _load_file_config()
+    file_cfg = _load_file_config(cwd=cwd)
     for key in DEFAULTS:
         if key in file_cfg:
             merged[key] = file_cfg[key]
@@ -175,10 +176,10 @@ def load_config():
     env_cfg = _load_env_overrides()
     merged.update(env_cfg)
 
-    # Clamp numeric ranges
-    merged["threshold"] = max(0, min(10, int(merged["threshold"])))
-    merged["max_rounds"] = max(1, min(100, int(merged["max_rounds"])))
-    merged["timeout"] = max(1, min(600, int(merged["timeout"])))
+    # Clamp numeric ranges (safe coercion — invalid strings fall back to defaults)
+    merged["threshold"] = max(0, min(10, _coerce_int(merged["threshold"], "threshold")))
+    merged["max_rounds"] = max(1, min(100, _coerce_int(merged["max_rounds"], "max_rounds")))
+    merged["timeout"] = max(1, min(600, _coerce_int(merged["timeout"], "timeout")))
 
     # Validate codex_path
     merged["codex_path"] = _validate_codex_path(merged["codex_path"])

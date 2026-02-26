@@ -266,6 +266,57 @@ class TestStripJsoncComments(unittest.TestCase):
         self.assertEqual(_strip_jsonc_comments(text), text)
 
 
+class TestInvalidTypeCoercion(unittest.TestCase):
+    """Bug fix: config loader must not crash on non-numeric string values."""
+
+    def setUp(self):
+        self._saved = {}
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                self._saved[k] = os.environ.pop(k)
+        self._orig_dir = os.getcwd()
+        self._tmpdir = tempfile.mkdtemp()
+        os.chdir(self._tmpdir)
+
+    def tearDown(self):
+        os.chdir(self._orig_dir)
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                del os.environ[k]
+        os.environ.update(self._saved)
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_threshold_invalid_string_uses_default(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"threshold": "not-a-number"}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.threshold, DEFAULTS["threshold"])
+
+    def test_max_rounds_invalid_string_uses_default(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"max_rounds": "abc"}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.max_rounds, DEFAULTS["max_rounds"])
+
+    def test_timeout_invalid_string_uses_default(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"timeout": "slow"}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.timeout, DEFAULTS["timeout"])
+
+    def test_threshold_float_string_uses_default(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"threshold": "7.5"}, f)
+        cfg = load_config()
+        # "7.5" cannot be int() coerced → falls back to default
+        self.assertEqual(cfg.threshold, DEFAULTS["threshold"])
+
+
 class TestStressTestConfig(unittest.TestCase):
     def setUp(self):
         self._saved = {}

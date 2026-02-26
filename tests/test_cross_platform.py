@@ -29,14 +29,6 @@ class TestTempPathConsistency(unittest.TestCase):
                         violations.append(f"{fname}:{i}: {line.strip()}")
         self.assertEqual(violations, [], f"Hardcoded /tmp found:\n" + "\n".join(violations))
 
-    def test_recent_eval_path_uses_tempdir(self):
-        """hook_utils._RECENT_EVAL_PATH should start with tempfile.gettempdir()."""
-        from hook_utils import _RECENT_EVAL_PATH
-        self.assertTrue(
-            _RECENT_EVAL_PATH.startswith(tempfile.gettempdir()),
-            f"Expected {_RECENT_EVAL_PATH} to start with {tempfile.gettempdir()}",
-        )
-
     def test_state_path_uses_tempdir(self):
         """state._state_path() should return path under tempfile.gettempdir()."""
         from state import _state_path
@@ -140,11 +132,14 @@ class TestEncodingRoundtrip(unittest.TestCase):
         self.assertIn("caf\u00e9", loaded["last_feedback"])
         self.assertIn("\U0001f680", loaded["last_feedback"])
 
-    def test_recent_eval_marker_roundtrip(self):
-        """Recent-eval marker writes and reads correctly."""
-        from hook_utils import mark_recent_evaluation, was_recently_evaluated
-        mark_recent_evaluation(self._session_id)
-        self.assertTrue(was_recently_evaluated())
+    def test_state_save_load_roundtrip(self):
+        """State saves and loads correctly."""
+        from state import load_state, save_state
+        state = load_state(self._session_id)
+        state["round_count"] = 2
+        save_state(state)
+        loaded = load_state(self._session_id)
+        self.assertEqual(loaded["round_count"], 2)
 
 
 class TestFcntlFallback(unittest.TestCase):

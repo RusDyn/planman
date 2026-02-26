@@ -24,17 +24,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.py ${CLAUDE_PLUGIN_ROOT}/scripts/stop_hook.py",
-            "timeout": 120
-          }
-        ]
-      }
     ]
   }
 }

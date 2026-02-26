@@ -15,10 +15,7 @@ from state import (
     record_feedback,
     save_state,
     update_for_plan,
-    _compute_plan_fingerprint,
-    _is_stale,
     _state_path,
-    _STALE_TTL,
 )
 
 
@@ -100,7 +97,7 @@ class TestClearState(unittest.TestCase):
 
 class TestUpdateForPlan(unittest.TestCase):
     def test_first_round_no_path(self):
-        """First inline evaluation (no stored fingerprint) → round 1."""
+        """No plan_path → increments from 0 to 1."""
         state = {
             "session_id": "test",
             "round_count": 0,
@@ -141,157 +138,34 @@ class TestUpdateForPlan(unittest.TestCase):
         state = update_for_plan(state, "My revised plan", plan_path="/a.md")
         self.assertEqual(state["round_count"], 3)
 
-    def test_no_plan_path_fingerprint_change_resets(self):
-        """No path, different title → round 1."""
-        state = {
-            "session_id": "test",
-            "round_count": 3,
-            "plan_hash": compute_plan_hash("Old plan"),
-            "plan_fingerprint": _compute_plan_fingerprint("# Old Plan\n1. Do X\n2. Do Y"),
-            "last_eval_time": __import__("time").time(),
-        }
-        state = update_for_plan(state, "# New Plan\n1. Do A\n2. Do B")
-        self.assertEqual(state["round_count"], 1)
-
-    def test_no_plan_path_same_title_different_body_resets(self):
-        """Same title but prefix hash differs (>500 char prefix change) → round 1."""
-        plan_a = "# My Plan\n" + "A" * 500
-        plan_b = "# My Plan\n" + "B" * 500
-        state = {
-            "session_id": "test",
-            "round_count": 3,
-            "plan_hash": compute_plan_hash(plan_a),
-            "plan_fingerprint": _compute_plan_fingerprint(plan_a),
-            "last_eval_time": __import__("time").time(),
-        }
-        state = update_for_plan(state, plan_b)
-        self.assertEqual(state["round_count"], 1)
-
-    def test_no_plan_path_same_fingerprint_increments(self):
-        """No path, same title + prefix → increment."""
-        # Plan must be >500 chars so appending beyond prefix doesn't change fingerprint
-        plan = "# My Plan\n" + ("1. Step with enough detail to fill space. " * 15)
-        self.assertGreater(len(plan), 500)
+    def test_no_plan_path_increments(self):
+        """No plan_path, existing state → increment."""
         state = {
             "session_id": "test",
             "round_count": 2,
-            "plan_hash": compute_plan_hash(plan),
-            "plan_fingerprint": _compute_plan_fingerprint(plan),
-            "last_eval_time": __import__("time").time(),
+            "plan_hash": compute_plan_hash("My plan"),
         }
-        # Append beyond 500-char prefix — fingerprint unchanged
-        revised = plan + "\n\nExtra details appended well past prefix boundary"
-        self.assertEqual(
-            _compute_plan_fingerprint(plan),
-            _compute_plan_fingerprint(revised),
-        )
-        state = update_for_plan(state, revised)
+        state = update_for_plan(state, "My revised plan")
         self.assertEqual(state["round_count"], 3)
 
-    def test_no_plan_path_first_eval_resets(self):
-        """No path, no stored fingerprint → round 1 (first inline eval)."""
-        state = {
-            "session_id": "test",
-            "round_count": 0,
-            "plan_hash": None,
-        }
-        state = update_for_plan(state, "# Plan\n1. Step one")
-        self.assertEqual(state["round_count"], 1)
-        self.assertIn("plan_fingerprint", state)
-
-    def test_plan_path_to_inline_transition_preserves_during_active_session(self):
-        """Prior state has plan_file_path, no plan_path in new eval, session fresh → preserve round count."""
-        state = {
-            "session_id": "test",
-            "round_count": 3,
-            "plan_hash": compute_plan_hash("old"),
-            "plan_file_path": "/a.md",
-            "last_eval_time": __import__("time").time(),
-            # no plan_fingerprint
-        }
-        state = update_for_plan(state, "# Inline Plan\n1. Step")
-        # Guard prevents stop hook from corrupting plan-mode round counter
-        self.assertEqual(state["round_count"], 3)
-
-    def test_stale_session_resets(self):
-        """last_eval_time > 30 min ago → round 1."""
-        plan = "# My Plan\n1. Do X"
-        state = {
-            "session_id": "test",
-            "round_count": 3,
-            "plan_hash": compute_plan_hash(plan),
-            "plan_fingerprint": _compute_plan_fingerprint(plan),
-            "last_eval_time": __import__("time").time() - _STALE_TTL - 1,
-        }
-        state = update_for_plan(state, plan)
-        self.assertEqual(state["round_count"], 1)
-
-    def test_fresh_session_increments(self):
-        """last_eval_time recent → increment."""
-        plan = "# My Plan\n1. Do X"
-        state = {
-            "session_id": "test",
-            "round_count": 2,
-            "plan_hash": compute_plan_hash(plan),
-            "plan_fingerprint": _compute_plan_fingerprint(plan),
-            "last_eval_time": __import__("time").time(),
-        }
-        state = update_for_plan(state, plan)
-        self.assertEqual(state["round_count"], 3)
-
-    def test_different_plan_same_fingerprint_increments(self):
-        """No plan_path, same title+prefix (hash changes but fingerprint doesn't) → increment."""
-        # Plan must be >500 chars so differences beyond prefix don't affect fingerprint
-        plan_a = "# My Plan\n" + ("1. Step with enough detail to fill space. " * 15)
-        self.assertGreater(len(plan_a), 500)
-        plan_b = plan_a + "\n\nExtra details appended well past prefix boundary"
-        fp_a = _compute_plan_fingerprint(plan_a)
-        fp_b = _compute_plan_fingerprint(plan_b)
-        self.assertEqual(fp_a, fp_b)  # fingerprints should match
-
-        state = {
-            "session_id": "test",
-            "round_count": 3,
-            "plan_hash": compute_plan_hash(plan_a),
-            "plan_fingerprint": fp_a,
-            "last_eval_time": __import__("time").time(),
-        }
-        state = update_for_plan(state, plan_b)
-        self.assertEqual(state["round_count"], 4)
-
-
-    def test_plan_mode_sets_fingerprint_on_new_file(self):
-        """plan_path provided → plan_fingerprint is set."""
+    def test_plan_hash_updated(self):
+        """plan_hash is updated on each call."""
         state = {"session_id": "test", "round_count": 0, "plan_hash": None}
-        state = update_for_plan(state, "# My Plan\n1. Do X", plan_path="/a.md")
-        self.assertIn("plan_fingerprint", state)
-        self.assertTrue(state["plan_fingerprint"].startswith("# My Plan|"))
+        state = update_for_plan(state, "Plan version 1", plan_path="/a.md")
+        hash1 = state["plan_hash"]
+        state = update_for_plan(state, "Plan version 2", plan_path="/a.md")
+        hash2 = state["plan_hash"]
+        self.assertNotEqual(hash1, hash2)
 
-    def test_plan_mode_sets_fingerprint_on_revision(self):
-        """Same plan_path (revision) → plan_fingerprint is updated."""
-        state = {
-            "session_id": "test",
-            "round_count": 1,
-            "plan_hash": compute_plan_hash("old"),
-            "plan_file_path": "/a.md",
-            "plan_fingerprint": "old|00000000",
-        }
-        state = update_for_plan(state, "# Revised Plan\n1. New step", plan_path="/a.md")
-        self.assertEqual(state["round_count"], 2)
-        self.assertTrue(state["plan_fingerprint"].startswith("# Revised Plan|"))
-
-    def test_stale_plan_mode_allows_stop_hook_reset(self):
-        """plan_file_path set but session stale (>30 min) → stop hook can reset."""
-        state = {
-            "session_id": "test",
-            "round_count": 3,
-            "plan_hash": compute_plan_hash("old"),
-            "plan_file_path": "/a.md",
-            "last_eval_time": __import__("time").time() - _STALE_TTL - 1,
-        }
-        state = update_for_plan(state, "# New Plan\n1. Step")
-        # Stale session → guard releases → stop hook resets to 1
-        self.assertEqual(state["round_count"], 1)
+    def test_last_eval_time_set(self):
+        """last_eval_time is always set."""
+        import time
+        state = {"session_id": "test", "round_count": 0, "plan_hash": None}
+        before = time.time()
+        state = update_for_plan(state, "My plan", plan_path="/a.md")
+        after = time.time()
+        self.assertGreaterEqual(state["last_eval_time"], before)
+        self.assertLessEqual(state["last_eval_time"], after)
 
 
 class TestRecordFeedback(unittest.TestCase):
@@ -301,52 +175,16 @@ class TestRecordFeedback(unittest.TestCase):
         self.assertEqual(state["last_score"], 5)
         self.assertEqual(state["last_feedback"], "Needs work")
 
+    def test_records_breakdown(self):
+        state = {"session_id": "test"}
+        breakdown = {"completeness": 2, "correctness": 1}
+        state = record_feedback(state, 7, "Good", breakdown)
+        self.assertEqual(state["last_breakdown"], breakdown)
 
-class TestComputePlanFingerprint(unittest.TestCase):
-    def test_heading(self):
-        fp = _compute_plan_fingerprint("# My Plan\n1. Step one")
-        self.assertTrue(fp.startswith("# My Plan|"))
-
-    def test_no_heading(self):
-        fp = _compute_plan_fingerprint("This is my plan\n1. Step one")
-        self.assertTrue(fp.startswith("This is my plan|"))
-
-    def test_empty(self):
-        fp = _compute_plan_fingerprint("")
-        self.assertTrue(fp.startswith("|"))
-        self.assertEqual(len(fp.split("|")[1]), 8)  # 8-char hex hash
-
-    def test_whitespace_only(self):
-        fp = _compute_plan_fingerprint("   \n\t  ")
-        self.assertTrue(fp.startswith("|"))
-
-
-class TestIsStale(unittest.TestCase):
-    def test_no_last_eval_time(self):
-        self.assertFalse(_is_stale({}))
-
-    def test_recent(self):
-        import time
-        self.assertFalse(_is_stale({"last_eval_time": time.time()}))
-
-    def test_stale(self):
-        import time
-        self.assertTrue(_is_stale({"last_eval_time": time.time() - _STALE_TTL - 1}))
-
-    def test_corrupted_string_value(self):
-        """Non-numeric last_eval_time must not crash."""
-        self.assertFalse(_is_stale({"last_eval_time": "corrupted"}))
-
-    def test_corrupted_list_value(self):
-        self.assertFalse(_is_stale({"last_eval_time": [1, 2, 3]}))
-
-    def test_corrupted_bool_value(self):
-        """bool is subclass of int — should not crash."""
-        # bool(True) == 1, so time.time() - True > _STALE_TTL → True (epoch 1s)
-        self.assertTrue(_is_stale({"last_eval_time": True}))
-
-    def test_none_explicit(self):
-        self.assertFalse(_is_stale({"last_eval_time": None}))
+    def test_none_breakdown_not_recorded(self):
+        state = {"session_id": "test"}
+        state = record_feedback(state, 5, "OK", None)
+        self.assertNotIn("last_breakdown", state)
 
 
 class TestSaveStateNanRejection(unittest.TestCase):

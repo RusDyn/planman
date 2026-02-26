@@ -69,8 +69,20 @@ def _main():
 
     try:
         marker = {"plan_file_path": file_path, "timestamp": time.time()}
-        with open(marker_path, "w", encoding="utf-8") as f:
-            json.dump(marker, f)
+        import tempfile as _tmpmod
+        tmp_fd, tmp_path = _tmpmod.mkstemp(
+            dir=os.path.dirname(marker_path), prefix="planman-marker-tmp-"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(marker, f)
+            os.replace(tmp_path, marker_path)
+        except (OSError, ValueError):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except OSError as e:
         print(f"[planman] warning: failed to write plan marker: {e}", file=sys.stderr)
 

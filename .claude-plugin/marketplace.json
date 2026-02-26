@@ -8,7 +8,7 @@
     {
       "name": "planman",
       "description": "Evaluates Claude Code plans using OpenAI Codex CLI",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "source": "./",
       "author": {
         "name": "rusdyn"

@@ -159,7 +159,7 @@ class TestRunEvaluation(unittest.TestCase):
         mock_eval.return_value = (None, "codex timed out")
         config = _make_config(fail_open=True)
 
-        result = run_evaluation(PLAN_TEXT, self._session_id, config)
+        result = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
         self.assertEqual(result["action"], "pass")
         self.assertIn("fail-open", result["system_message"].lower())
 
@@ -169,7 +169,7 @@ class TestRunEvaluation(unittest.TestCase):
         mock_eval.return_value = (None, "codex timed out")
         config = _make_config(fail_open=False)
 
-        result = run_evaluation(PLAN_TEXT, self._session_id, config)
+        result = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
         self.assertEqual(result["action"], "block")
         self.assertIn("PLANMAN_FAIL_OPEN", result["reason"])
 
@@ -196,47 +196,15 @@ class TestRunEvaluation(unittest.TestCase):
 
     @patch("hook_utils.evaluate_plan")
     def test_not_a_plan_passes_through(self, mock_eval):
-        """is_plan=false → pass, no state modification."""
+        """is_plan=false → pass (safety valve), no state modification."""
         from hook_utils import run_evaluation
         mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
         config = _make_config()
 
-        result = run_evaluation("Some code output", self._session_id, config)
+        result = run_evaluation("Some code output", self._session_id, config, plan_path="/test.md")
         self.assertEqual(result["action"], "pass")
         self.assertIsNone(result["reason"])
         self.assertIsNone(result["system_message"])
-
-    @patch("hook_utils.evaluate_plan")
-    def test_not_a_plan_skips_first_round_block(self, mock_eval):
-        """is_plan=false on round 1 → still pass (not blocked)."""
-        from hook_utils import run_evaluation
-        mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
-        config = _make_config()
-
-        result = run_evaluation("Some explanation text", self._session_id, config)
-        self.assertEqual(result["action"], "pass")
-
-    @patch("hook_utils.mark_recent_evaluation")
-    @patch("hook_utils.evaluate_plan")
-    def test_not_a_plan_does_not_mark_evaluation(self, mock_eval, mock_mark):
-        """is_plan=false → mark_recent_evaluation NOT called."""
-        from hook_utils import run_evaluation
-        mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
-        config = _make_config()
-
-        run_evaluation("Some code output", self._session_id, config)
-        mock_mark.assert_not_called()
-
-    @patch("hook_utils.mark_recent_evaluation")
-    @patch("hook_utils.evaluate_plan")
-    def test_confirmed_plan_marks_evaluation(self, mock_eval, mock_mark):
-        """is_plan=true → mark_recent_evaluation IS called."""
-        from hook_utils import run_evaluation
-        mock_eval.return_value = (VALID_RESULT, None)
-        config = _make_config()
-
-        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
-        mock_mark.assert_called_once_with(self._session_id)
 
     @patch("hook_utils.evaluate_plan")
     def test_contract_pass_fields(self, mock_eval):
@@ -265,174 +233,6 @@ class TestRunEvaluation(unittest.TestCase):
         self.assertEqual(result["action"], "block")
         self.assertIsNotNone(result["reason"])
         self.assertIsNotNone(result["system_message"])
-
-
-class TestNonPlanCaching(unittest.TestCase):
-    """Tests for non-plan hash caching."""
-
-    def setUp(self):
-        self._session_id = f"test-nonplan-{os.getpid()}-{id(self)}"
-
-    def tearDown(self):
-        clear_state(self._session_id)
-
-    @patch("hook_utils.evaluate_plan")
-    def test_nonplan_hash_cached(self, mock_eval):
-        """Second call with same non-plan text skips LLM entirely."""
-        from hook_utils import run_evaluation
-        mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
-        config = _make_config()
-
-        non_plan_text = "Done! The file has been updated successfully."
-
-        # First call: LLM classifies as non-plan
-        r1 = run_evaluation(non_plan_text, self._session_id, config)
-        self.assertEqual(r1["action"], "pass")
-        self.assertEqual(mock_eval.call_count, 1)
-
-        # Second call: same text, cached, LLM NOT called
-        r2 = run_evaluation(non_plan_text, self._session_id, config)
-        self.assertEqual(r2["action"], "pass")
-        self.assertEqual(mock_eval.call_count, 1)  # still 1, cache hit
-
-    @patch("hook_utils.evaluate_plan")
-    def test_nonplan_cache_cleared_on_plan_eval(self, mock_eval):
-        """Non-plan cache is invalidated when a real plan arrives and is approved."""
-        from hook_utils import run_evaluation
-        config = _make_config()
-
-        non_plan_text = "Done! The file has been updated successfully."
-
-        # First: classify as non-plan
-        mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
-        run_evaluation(non_plan_text, self._session_id, config)
-        self.assertEqual(mock_eval.call_count, 1)
-
-        # Second: real plan arrives via plan-mode (sets plan_file_path, clears nonplan cache)
-        mock_eval.return_value = (VALID_RESULT, None)
-        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/a.md")
-        self.assertEqual(mock_eval.call_count, 2)
-
-        # Simulate plan approval: clear_state removes plan_file_path
-        clear_state(self._session_id)
-
-        # Third: same non-plan text again — cache was cleared by plan eval, LLM called
-        mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
-        r3 = run_evaluation(non_plan_text, self._session_id, config)
-        self.assertEqual(r3["action"], "pass")
-        self.assertEqual(mock_eval.call_count, 3)
-
-    @patch("hook_utils.evaluate_plan")
-    def test_nonplan_cache_only_applies_to_stop_hook(self, mock_eval):
-        """Non-plan cache is only checked when plan_path is absent (stop-hook path)."""
-        from hook_utils import run_evaluation
-        from state import load_state, save_state, compute_plan_hash
-        config = _make_config()
-
-        # Pre-seed state with a non-plan hash matching PLAN_TEXT
-        state = load_state(self._session_id)
-        state["last_nonplan_hash"] = compute_plan_hash(PLAN_TEXT)
-        save_state(state)
-
-        # plan_path present, cache should NOT be checked, LLM should be called
-        mock_eval.return_value = (VALID_RESULT, None)
-        r = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/a.md")
-        self.assertEqual(r["action"], "block")  # first-round mandatory rejection
-        mock_eval.assert_called_once()
-
-
-class TestPlanModeGuardInRunEvaluation(unittest.TestCase):
-    """Tests for plan-mode guard short-circuit in run_evaluation."""
-
-    def setUp(self):
-        self._session_id = f"test-guard-{os.getpid()}-{id(self)}"
-
-    def tearDown(self):
-        clear_state(self._session_id)
-
-    @patch("hook_utils.evaluate_plan")
-    def test_guard_skips_llm_entirely(self, mock_eval):
-        """When plan-mode is active, stop-hook run_evaluation skips LLM call."""
-        from hook_utils import run_evaluation
-        from state import load_state, save_state, update_for_plan
-        config = _make_config()
-
-        # Simulate plan-mode round 1 (sets plan_file_path)
-        state = load_state(self._session_id)
-        state = update_for_plan(state, PLAN_TEXT, plan_path="/a.md")
-        save_state(state)
-
-        # Stop-hook path (no plan_path): guard should short-circuit
-        r = run_evaluation(PLAN_TEXT, self._session_id, config)
-        self.assertEqual(r["action"], "pass")
-        mock_eval.assert_not_called()
-
-    @patch("hook_utils.evaluate_plan")
-    def test_guard_does_not_contaminate_state(self, mock_eval):
-        """Stop-hook during active plan-mode must NOT add last_nonplan_hash to state."""
-        from hook_utils import run_evaluation
-        from state import load_state, save_state, update_for_plan
-        config = _make_config()
-
-        # Simulate plan-mode round 1
-        state = load_state(self._session_id)
-        state = update_for_plan(state, PLAN_TEXT, plan_path="/a.md")
-        save_state(state)
-
-        # Stop-hook fires with non-plan text
-        mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
-        run_evaluation("Done! File updated.", self._session_id, config)
-
-        # State must NOT have last_nonplan_hash
-        state_after = load_state(self._session_id)
-        self.assertNotIn("last_nonplan_hash", state_after)
-        self.assertEqual(state_after["round_count"], 1)  # unchanged
-
-    @patch("hook_utils.evaluate_plan")
-    def test_guard_releases_after_stale(self, mock_eval):
-        """After 30 min of inactivity, guard releases and stop-hook proceeds."""
-        from hook_utils import run_evaluation
-        from state import load_state, save_state, update_for_plan, _STALE_TTL
-        import time as time_mod
-        config = _make_config()
-
-        # Simulate plan-mode from 31 minutes ago
-        state = load_state(self._session_id)
-        state = update_for_plan(state, PLAN_TEXT, plan_path="/a.md")
-        state["last_eval_time"] = time_mod.time() - _STALE_TTL - 1
-        save_state(state)
-
-        # Stop-hook should now proceed (session stale)
-        mock_eval.return_value = (VALID_RESULT, None)
-        r = run_evaluation(PLAN_TEXT, self._session_id, config)
-        # LLM IS called — guard released
-        mock_eval.assert_called_once()
-
-    @patch("hook_utils.evaluate_plan")
-    def test_nonplan_cache_different_texts(self, mock_eval):
-        """Cache stores only the most recent non-plan hash — different text causes re-evaluation."""
-        from hook_utils import run_evaluation
-        config = _make_config()
-        mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
-
-        text_a = "Done! Updated config file."
-        text_b = "Finished! All tests pass."
-
-        # Text A: classified as non-plan, cache = hash(A)
-        run_evaluation(text_a, self._session_id, config)
-        self.assertEqual(mock_eval.call_count, 1)
-
-        # Text A again: cache hit, LLM NOT called
-        run_evaluation(text_a, self._session_id, config)
-        self.assertEqual(mock_eval.call_count, 1)
-
-        # Text B: different hash, LLM called, cache = hash(B)
-        run_evaluation(text_b, self._session_id, config)
-        self.assertEqual(mock_eval.call_count, 2)
-
-        # Text A again: cache has hash(B), miss, LLM called, cache = hash(A)
-        run_evaluation(text_a, self._session_id, config)
-        self.assertEqual(mock_eval.call_count, 3)
 
 
 class TestStressTestEvaluation(unittest.TestCase):
@@ -489,16 +289,6 @@ class TestStressTestEvaluation(unittest.TestCase):
 
         result = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
         self.assertEqual(result["reason"], custom)
-
-    @patch("hook_utils.mark_recent_evaluation")
-    @patch("hook_utils.evaluate_plan")
-    def test_stress_test_marks_recent_evaluation(self, mock_eval, mock_mark):
-        """Stress-test round 1 still marks recent evaluation (double-eval prevention)."""
-        from hook_utils import run_evaluation
-        config = _make_config(stress_test=True)
-
-        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
-        mock_mark.assert_called_once_with(self._session_id)
 
     @patch("hook_utils.evaluate_plan")
     def test_no_stress_test_uses_codex_round_one(self, mock_eval):
@@ -564,183 +354,101 @@ class TestFormatFeedback(unittest.TestCase):
         self.assertIn("8/10", text)
 
 
-class TestSessionAwareRecentEval(unittest.TestCase):
-    """Tests for session-aware was_recently_evaluated()."""
+class TestPlanFileSizeLimit(unittest.TestCase):
+    """Test that oversized plan files are rejected by _find_plan_file."""
 
-    def setUp(self):
-        from hook_utils import _RECENT_EVAL_PATH
-        self._marker_path = _RECENT_EVAL_PATH
+    def test_oversized_plan_via_marker_returns_none(self):
+        """Plan file > 1MB referenced by marker → returns (None, None)."""
+        import tempfile as _tmpmod
+        from pre_exit_plan_hook import _find_plan_file, _safe_session_id, _MARKER_TEMPLATE
+
+        session_id = f"test-size-{os.getpid()}"
+        safe_id = _safe_session_id(session_id)
+
+        # Create an oversized plan file
+        with _tmpmod.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("# Plan\n" + "x" * 1_100_000)
+            oversized_path = f.name
+
+        # Create marker pointing to it
+        marker_path = _MARKER_TEMPLATE.format(session_id=safe_id)
+        with open(marker_path, "w") as f:
+            json.dump({"plan_file_path": oversized_path}, f)
+
         try:
-            os.unlink(self._marker_path)
-        except OSError:
-            pass
+            plan_path, plan_text = _find_plan_file(session_id, None)
+            self.assertIsNone(plan_path)
+            self.assertIsNone(plan_text)
+        finally:
+            os.unlink(oversized_path)
+            try:
+                os.unlink(marker_path)
+            except OSError:
+                pass
 
-    def tearDown(self):
+    def test_normal_size_plan_accepted(self):
+        """Plan file under 1MB → returns content."""
+        import tempfile as _tmpmod
+        from pre_exit_plan_hook import _find_plan_file, _safe_session_id, _MARKER_TEMPLATE
+
+        session_id = f"test-size-ok-{os.getpid()}"
+        safe_id = _safe_session_id(session_id)
+
+        with _tmpmod.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("# Plan\n1. Step one\n2. Step two")
+            plan_file = f.name
+
+        marker_path = _MARKER_TEMPLATE.format(session_id=safe_id)
+        with open(marker_path, "w") as f:
+            json.dump({"plan_file_path": plan_file}, f)
+
         try:
-            os.unlink(self._marker_path)
-        except OSError:
-            pass
-
-    def test_same_session_returns_true(self):
-        from hook_utils import mark_recent_evaluation, was_recently_evaluated
-        mark_recent_evaluation("session-A")
-        self.assertTrue(was_recently_evaluated("session-A"))
-
-    def test_different_session_returns_false(self):
-        from hook_utils import mark_recent_evaluation, was_recently_evaluated
-        mark_recent_evaluation("session-A")
-        self.assertFalse(was_recently_evaluated("session-B"))
-
-    def test_no_session_id_returns_true_for_any(self):
-        """Backwards compat: no session_id → returns True if any recent eval."""
-        from hook_utils import mark_recent_evaluation, was_recently_evaluated
-        mark_recent_evaluation("session-A")
-        self.assertTrue(was_recently_evaluated())
-
-    def test_no_marker_returns_false(self):
-        from hook_utils import was_recently_evaluated
-        self.assertFalse(was_recently_evaluated("session-A"))
+            plan_path, plan_text = _find_plan_file(session_id, None)
+            self.assertEqual(plan_path, plan_file)
+            self.assertIn("Step one", plan_text)
+        finally:
+            os.unlink(plan_file)
+            try:
+                os.unlink(marker_path)
+            except OSError:
+                pass
 
 
-class TestRunStopHookEvaluation(unittest.TestCase):
-    """Dedicated tests for _run_stop_hook_evaluation (classify-only path)."""
-
-    def setUp(self):
-        self._session_id = f"test-stophook-eval-{os.getpid()}-{id(self)}"
-
-    def tearDown(self):
-        clear_state(self._session_id)
+class TestScoreMismatchAccepted(unittest.TestCase):
+    """Test that score doesn't need to equal breakdown sum (design choice)."""
 
     @patch("hook_utils.evaluate_plan")
-    def test_nonplan_caches_hash(self, mock_eval):
-        """Non-plan classification saves last_nonplan_hash to state."""
-        from hook_utils import _run_stop_hook_evaluation
-        from state import load_state
-        mock_eval.return_value = (NOT_A_PLAN_RESULT, None)
-        config = _make_config()
-        state = load_state(self._session_id)
-
-        result = _run_stop_hook_evaluation("Hello world", state, self._session_id, config, None)
-        self.assertEqual(result["action"], "pass")
-
-        # Verify state was saved with hash
-        reloaded = load_state(self._session_id)
-        self.assertIn("last_nonplan_hash", reloaded)
-
-    @patch("hook_utils.evaluate_plan")
-    def test_plan_above_threshold_passes(self, mock_eval):
-        """Plan with score >= threshold → pass with approval message."""
-        from hook_utils import _run_stop_hook_evaluation
-        from state import load_state
-        mock_eval.return_value = (VALID_RESULT, None)  # score=8, threshold=7
-        config = _make_config()
-        state = load_state(self._session_id)
-
-        result = _run_stop_hook_evaluation(PLAN_TEXT, state, self._session_id, config, None)
-        self.assertEqual(result["action"], "pass")
-        self.assertIn("Plan approved", result["system_message"])
-
-    @patch("hook_utils.evaluate_plan")
-    def test_plan_below_threshold_blocks(self, mock_eval):
-        """Plan with score < threshold → block with feedback."""
-        from hook_utils import _run_stop_hook_evaluation
-        from state import load_state
-        mock_eval.return_value = (LOW_SCORE_RESULT, None)  # score=4, threshold=7
-        config = _make_config()
-        state = load_state(self._session_id)
-
-        result = _run_stop_hook_evaluation(PLAN_TEXT, state, self._session_id, config, None)
-        self.assertEqual(result["action"], "block")
-        self.assertIn("4/10", result["reason"])
-        self.assertIn("Inline plan rejected", result["system_message"])
-
-    @patch("hook_utils.evaluate_plan")
-    def test_error_fail_open(self, mock_eval):
-        """Evaluation error + fail_open → pass with warning."""
-        from hook_utils import _run_stop_hook_evaluation
-        from state import load_state
-        mock_eval.return_value = (None, "timeout")
-        config = _make_config(fail_open=True)
-        state = load_state(self._session_id)
-
-        result = _run_stop_hook_evaluation(PLAN_TEXT, state, self._session_id, config, None)
-        self.assertEqual(result["action"], "pass")
-        self.assertIn("fail-open", result["system_message"].lower())
-
-    @patch("hook_utils.evaluate_plan")
-    def test_error_fail_closed(self, mock_eval):
-        """Evaluation error + fail_open=False → block."""
-        from hook_utils import _run_stop_hook_evaluation
-        from state import load_state
-        mock_eval.return_value = (None, "timeout")
-        config = _make_config(fail_open=False)
-        state = load_state(self._session_id)
-
-        result = _run_stop_hook_evaluation(PLAN_TEXT, state, self._session_id, config, None)
-        self.assertEqual(result["action"], "block")
-        self.assertIn("PLANMAN_FAIL_OPEN", result["reason"])
-
-    @patch("hook_utils.evaluate_plan")
-    def test_plan_clears_nonplan_hash(self, mock_eval):
-        """When classified as plan, last_nonplan_hash is removed from state."""
-        from hook_utils import _run_stop_hook_evaluation
-        from state import load_state, save_state, compute_plan_hash
-        config = _make_config()
-
-        # Pre-seed nonplan hash
-        state = load_state(self._session_id)
-        state["last_nonplan_hash"] = compute_plan_hash("old text")
-        save_state(state)
-
-        mock_eval.return_value = (VALID_RESULT, None)
-        state = load_state(self._session_id)
-        result = _run_stop_hook_evaluation(PLAN_TEXT, state, self._session_id, config, None)
-        self.assertEqual(result["action"], "pass")
-        # state object should have last_nonplan_hash removed
-        self.assertNotIn("last_nonplan_hash", state)
-
-    @patch("hook_utils.evaluate_plan")
-    def test_no_round_tracking(self, mock_eval):
-        """Stop-hook path does NOT modify round_count in state."""
-        from hook_utils import _run_stop_hook_evaluation
-        from state import load_state
-        mock_eval.return_value = (LOW_SCORE_RESULT, None)
-        config = _make_config()
-        state = load_state(self._session_id)
-        original_round = state.get("round_count", 0)
-
-        _run_stop_hook_evaluation(PLAN_TEXT, state, self._session_id, config, None)
-        self.assertEqual(state.get("round_count", 0), original_round)
-
-    @patch("hook_utils.evaluate_plan")
-    def test_no_stress_test(self, mock_eval):
-        """Stop-hook path ignores stress_test config — always calls LLM."""
-        from hook_utils import _run_stop_hook_evaluation
-        from state import load_state
-        mock_eval.return_value = (VALID_RESULT, None)
-        config = _make_config(stress_test=True)
-        state = load_state(self._session_id)
-
-        _run_stop_hook_evaluation(PLAN_TEXT, state, self._session_id, config, None)
-        mock_eval.assert_called_once()  # LLM called despite stress_test=True
-
-    @patch("hook_utils.evaluate_plan")
-    def test_missing_is_plan_defaults_to_true(self, mock_eval):
-        """Result without is_plan field defaults to True (plan)."""
-        from hook_utils import _run_stop_hook_evaluation
-        from state import load_state
-        result_no_flag = {
-            "score": 9,
-            "breakdown": VALID_RESULT["breakdown"],
-            "strengths": ["Good"],
+    def test_score_mismatch_still_accepted(self, mock_eval):
+        """score=7 with breakdown sum=8 → accepted on round 2 (no validation)."""
+        from hook_utils import run_evaluation
+        mismatched_result = {
+            "score": 7,
+            "breakdown": {
+                "completeness": 2,
+                "correctness": 2,
+                "sequencing": 2,
+                "risk_awareness": 1,
+                "clarity": 1,
+            },
+            "weaknesses": [],
+            "suggestions": [],
+            "strengths": ["Good plan"],
+            "is_plan": True,
         }
-        mock_eval.return_value = (result_no_flag, None)
-        config = _make_config()
-        state = load_state(self._session_id)
+        mock_eval.return_value = (mismatched_result, None)
+        config = _make_config(threshold=7)
 
-        r = _run_stop_hook_evaluation(PLAN_TEXT, state, self._session_id, config, None)
-        self.assertEqual(r["action"], "pass")
-        self.assertIn("Plan approved", r["system_message"])
+        session_id = f"test-mismatch-{os.getpid()}"
+        try:
+            # Round 1: mandatory rejection
+            r1 = run_evaluation(PLAN_TEXT, session_id, config, plan_path="/test.md")
+            self.assertEqual(r1["action"], "block")
+
+            # Round 2: score=7 >= threshold=7 → pass despite sum=8
+            r2 = run_evaluation(PLAN_TEXT, session_id, config, plan_path="/test.md")
+            self.assertEqual(r2["action"], "pass")
+        finally:
+            clear_state(session_id)
 
 
 if __name__ == "__main__":

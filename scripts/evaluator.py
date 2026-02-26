@@ -36,10 +36,7 @@ def build_prompt(plan_text, rubric, previous_feedback=None, round_number=1):
     """Build the evaluation prompt for codex exec."""
     prompt = (
         "You are a senior software architect reviewing an implementation plan.\n\n"
-        "**First**, determine if the text below is actually an implementation plan.\n"
-        "If it is NOT a plan (e.g., code output, status update, explanation, or conversation), "
-        "set is_plan=false and assign minimal scores.\n"
-        "If it IS a plan, evaluate it thoroughly using the rubric.\n\n"
+        "Evaluate the following implementation plan using the rubric.\n\n"
         f"{rubric}\n\n"
         "## Feedback Guidelines\n\n"
         "- Prioritize issues: list critical problems first, minor improvements last\n"
@@ -129,14 +126,10 @@ def parse_codex_output(stdout):
     if not isinstance(data, dict):
         return None, "codex output is not a JSON object"
 
-    required = ("score", "breakdown", "weaknesses", "suggestions", "strengths", "is_plan")
+    required = ("score", "breakdown", "weaknesses", "suggestions", "strengths")
     missing = [k for k in required if k not in data]
     if missing:
         return None, f"codex output missing fields: {', '.join(missing)}"
-
-    is_plan = data.get("is_plan")
-    if not isinstance(is_plan, bool):
-        return None, "missing or invalid is_plan field"
 
     score = data.get("score")
     if not isinstance(score, int) or score < 1 or score > 10:

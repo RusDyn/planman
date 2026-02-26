@@ -64,6 +64,6 @@
       "description": "Is this text an implementation plan? false for non-plan content (code, explanations, conversation, status updates)."
     }
   },
-  "required": ["score", "breakdown", "weaknesses", "suggestions", "strengths", "is_plan"],
+  "required": ["score", "breakdown", "weaknesses", "suggestions", "strengths"],
   "additionalProperties": false
 }

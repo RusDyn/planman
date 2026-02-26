@@ -81,79 +81,21 @@ def clear_state(session_id):
         pass
 
 
-def _is_stale(state):
-    """Return True if last evaluation was long enough ago to indicate a new planning context."""
-    last_time = state.get("last_eval_time")
-    if not isinstance(last_time, (int, float)):
-        return False
-    try:
-        return (time.time() - last_time) > _STALE_TTL
-    except (TypeError, ValueError):
-        return False
-
-
-def _compute_plan_fingerprint(plan_text):
-    """Compute a deterministic identity fingerprint for an inline plan.
-
-    Combines the first heading/line (stable across revisions) with a normalized
-    prefix hash (first 500 chars, catches same-title/different-plan collisions).
-    Returns a string like "# My Plan|a3b2c1d0".
-    """
-    title = ""
-    for line in plan_text.strip().splitlines():
-        line = line.strip()
-        if line.startswith("#"):
-            title = line
-            break
-        if line:
-            title = line[:120]
-            break
-
-    # Prefix hash: first 500 chars normalized — stable across minor revisions
-    # but changes when the plan body is fundamentally different
-    prefix = " ".join(plan_text[:500].split())
-    prefix_hash = hashlib.sha256(prefix.encode("utf-8")).hexdigest()[:8]
-    return f"{title}|{prefix_hash}"
-
-
 def update_for_plan(state, plan_text, plan_path=None):
     """Update state for a new plan evaluation.
 
     Resets round counter when:
-    - plan_path differs from stored path (new plan file — plan-mode signal)
-    - plan_path absent AND fingerprint differs (new inline plan — stop-hook signal)
-    - plan_path absent AND no stored fingerprint (first inline eval — reset)
-    - Last evaluation was > 30 min ago (stale session fallback)
+    - plan_path differs from stored path (new plan file)
     Otherwise increments.
     """
     new_hash = compute_plan_hash(plan_text)
 
     if plan_path and plan_path != state.get("plan_file_path"):
-        # Plan-mode: different file (or first file) = new plan
+        # New plan file (or first file) = new plan
         state["round_count"] = 1
-        state["plan_fingerprint"] = _compute_plan_fingerprint(plan_text)
-    elif not plan_path:
-        # Active plan-mode session: don't let stop hook corrupt round counter
-        if state.get("plan_file_path") and not _is_stale(state):
-            return state
-        # Stop-hook path: fingerprint = title + prefix hash
-        new_fp = _compute_plan_fingerprint(plan_text)
-        old_fp = state.get("plan_fingerprint")
-        if old_fp is None:
-            # First inline evaluation in this session — reset to 1
-            state["round_count"] = 1
-        elif new_fp != old_fp:
-            # Different plan (title or body prefix changed substantially)
-            state["round_count"] = 1
-        elif _is_stale(state):
-            state["round_count"] = 1
-        else:
-            state["round_count"] = state.get("round_count", 0) + 1
-        state["plan_fingerprint"] = new_fp
     else:
-        # Plan-mode: same file = revision
+        # Same file = revision
         state["round_count"] = state.get("round_count", 0) + 1
-        state["plan_fingerprint"] = _compute_plan_fingerprint(plan_text)
 
     state["plan_hash"] = new_hash
     state["last_eval_time"] = time.time()

@@ -1,9 +1,9 @@
-"""Shared evaluation helpers for planman hooks (PostToolUse + Stop).
+"""Shared evaluation helpers for planman hooks (PreToolUse(ExitPlanMode)).
 
 Contains the common evaluation flow:
   detect plan -> load state -> check round limit -> assess -> format output
 
-Used by both post_tool_hook.py (plan mode) and stop_hook.py (inline plans).
+Used by pre_exit_plan_hook.py (plan mode).
 """
 
 import json
@@ -21,7 +21,6 @@ except ImportError:
 from config import load_config
 from evaluator import check_codex_installed, evaluate_plan
 from state import (
-    _is_stale,
     clear_state,
     compute_plan_hash,
     load_state,
@@ -29,10 +28,6 @@ from state import (
     save_state,
     update_for_plan,
 )
-
-# Path for recent-evaluation marker (prevents double-eval by Stop hook)
-_RECENT_EVAL_PATH = os.path.join(tempfile.gettempdir(), "planman-recent-eval.json")
-_RECENT_EVAL_TTL = 60  # seconds
 
 
 def _log_to_file(msg, cwd):
@@ -133,93 +128,6 @@ def format_approval(data):
     return "\n".join(lines)
 
 
-def mark_recent_evaluation(session_id):
-    """Write a marker so the Stop hook can skip double-evaluation."""
-    try:
-        with open(_RECENT_EVAL_PATH, "w", encoding="utf-8") as f:
-            json.dump({"session_id": session_id, "timestamp": time.time()}, f)
-    except OSError:
-        pass
-
-
-def was_recently_evaluated(session_id=None):
-    """Check if a plan was recently evaluated by PostToolUse hook.
-
-    When *session_id* is provided, only returns True if the marker
-    belongs to the same session — prevents cross-session false skipping.
-    """
-    try:
-        with open(_RECENT_EVAL_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        ts = data.get("timestamp", 0)
-        if time.time() - ts < _RECENT_EVAL_TTL:
-            if session_id is not None and data.get("session_id") != session_id:
-                return False
-            return True
-    except (OSError, json.JSONDecodeError, KeyError):
-        pass
-    return False
-
-
-def _run_stop_hook_evaluation(plan_text, state, session_id, config, cwd):
-    """Stop-hook classify-only path — no round tracking, no stress-test.
-
-    Asks the LLM whether *plan_text* is a plan.  If yes, evaluates quality
-    and blocks/passes.  If no, caches the non-plan hash and passes through.
-    No round counter, no first-round rejection, no stress-test rejection.
-    """
-    result, error = evaluate_plan(plan_text, config, None, 1, cwd=cwd)
-
-    if error:
-        log(f"stop-hook evaluation error: {error}", config, cwd)
-        if config.fail_open:
-            return {
-                "action": "pass",
-                "reason": None,
-                "system_message": f"Planman: Evaluation failed ({error}). Passing through (fail-open).",
-            }
-        return {
-            "action": "block",
-            "reason": f"Planman evaluation failed: {error}. Set PLANMAN_FAIL_OPEN=true to pass through on errors.",
-            "system_message": None,
-        }
-
-    is_plan_flag = result.get("is_plan", True)
-
-    if not is_plan_flag:
-        # Cache non-plan hash so next stop hook call can skip LLM
-        state["last_nonplan_hash"] = compute_plan_hash(plan_text)
-        save_state(state)
-        log("LLM classified as non-plan — passing through", config, cwd)
-        return {"action": "pass", "reason": None, "system_message": None}
-
-    # It IS a plan — evaluate quality and act on score
-    mark_recent_evaluation(session_id)
-    state.pop("last_nonplan_hash", None)
-    assessment_score = result["score"]
-
-    if assessment_score >= config.threshold:
-        log(f"stop-hook: inline plan accepted ({assessment_score}/10)", config, cwd)
-        return {
-            "action": "pass",
-            "reason": None,
-            "system_message": f"Planman: {format_approval(result)}",
-        }
-
-    feedback_text = format_feedback(
-        result, config.threshold, 1, config.max_rounds
-    )
-    log(f"stop-hook: inline plan rejected ({assessment_score}/{config.threshold})", config, cwd)
-    return {
-        "action": "block",
-        "reason": feedback_text,
-        "system_message": (
-            f"Planman: Inline plan rejected ({assessment_score}/10, "
-            f"threshold {config.threshold})."
-        ),
-    }
-
-
 def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     """Run the full plan evaluation flow.
 
@@ -235,29 +143,7 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     # Load state and update round counter
     state = load_state(session_id)
 
-    # Skip LLM if this text was already classified as non-plan
-    if not plan_path:
-        text_hash = compute_plan_hash(plan_text)
-        if text_hash == state.get("last_nonplan_hash"):
-            return {"action": "pass", "reason": None, "system_message": None}
-
-    # Check if plan-mode owns this session BEFORE updating state.
-    # update_for_plan guards against this too, but we must short-circuit
-    # the entire evaluation — otherwise run_evaluation would continue with
-    # the guarded state and potentially save contaminated data (e.g.
-    # last_nonplan_hash, record_feedback) to plan-mode's state file.
-    if not plan_path and state.get("plan_file_path") and not _is_stale(state):
-        log("plan-mode session active — skipping evaluation", config, cwd)
-        return {"action": "pass", "reason": None, "system_message": None}
-
-    # ── Stop-hook path (no plan_path): classify-only ──────────────
-    # Skip all plan-mode machinery (stress-test, round tracking,
-    # first-round rejection, max-rounds).  Just ask the LLM whether
-    # this text is a plan, cache the answer, and act on the score.
-    if not plan_path:
-        return _run_stop_hook_evaluation(plan_text, state, session_id, config, cwd)
-
-    # ── Plan-mode path (plan_path set): full multi-round flow ────
+    # ── Plan-mode path: full multi-round flow ────
     state = update_for_plan(state, plan_text, plan_path)
     log(f"round {state['round_count']}/{config.max_rounds}", config, cwd)
 
@@ -278,7 +164,6 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
 
     # Stress-test mode: skip Codex on round 1, reject with custom prompt
     if config.stress_test and state["round_count"] == 1:
-        mark_recent_evaluation(session_id)
         state = record_feedback(state, None, config.stress_test_prompt, None)
         try:
             save_state(state)
@@ -318,13 +203,10 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     assessment_score = result["score"]
     is_plan_flag = result.get("is_plan", True)
 
-    # Non-plan text — pass through without touching state
+    # Non-plan text — pass through without touching state (safety valve)
     if not is_plan_flag:
         log("LLM classified as non-plan — passing through", config, cwd)
         return {"action": "pass", "reason": None, "system_message": None}
-
-    # Only mark evaluation AFTER confirming it's a plan
-    mark_recent_evaluation(session_id)
 
     # First-round mandatory rejection
     if state["round_count"] == 1:

@@ -14,9 +14,9 @@ Run these commands and report the results:
 2. Show effective configuration by running:
    ```bash
    python3 -c "
-   import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts')
+   import sys, os; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts')
    from config import load_config
-   c = load_config()
+   c = load_config(cwd=os.getcwd())
    print(f'enabled:    {c.enabled}')
    print(f'threshold:  {c.threshold}/10')
    print(f'max_rounds: {c.max_rounds}')
