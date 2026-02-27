@@ -7,8 +7,8 @@ Does NOT evaluate plans — that happens in pre_exit_plan_hook.py when
 Claude calls ExitPlanMode.
 
 PostToolUse input (stdin JSON):
-  tool_name: "Write"
-  tool_input: {file_path: "...", content: "..."}
+  tool_name: "Write" or "Edit"
+  tool_input: {file_path: "...", ...}
   session_id: str
   ...
 
@@ -45,9 +45,9 @@ def _main():
         except json.JSONDecodeError:
             sys.exit(0)
 
-    # Only handle Write tool
+    # Only handle Write and Edit tools
     tool_name = hook_input.get("tool_name", "")
-    if tool_name != "Write":
+    if tool_name not in ("Write", "Edit"):
         sys.exit(0)
 
     tool_input = hook_input.get("tool_input", {})
