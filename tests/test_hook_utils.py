@@ -52,7 +52,7 @@ def _make_config(**overrides):
         "rubric": "Score it 1-10.",
         "codex_path": "codex",
         "verbose": False,
-        "timeout": 120,
+        "timeout": 180,
         "stress_test": False,
         "stress_test_prompt": "Stress-test default prompt",
         "source_verify": True,

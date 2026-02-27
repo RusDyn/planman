@@ -37,7 +37,7 @@ DEFAULTS = {
     "custom_rubric": "",
     "codex_path": "codex",
     "verbose": False,
-    "timeout": 120,
+    "timeout": 180,
     "stress_test": False,
     "stress_test_prompt": "",
     "context": "",

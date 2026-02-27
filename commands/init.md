@@ -46,7 +46,7 @@ content = '''// Planman configuration
   // Debug output to stderr + log file
   \"verbose\": false,
   // Seconds for codex subprocess (1-600)
-  \"timeout\": 120,
+  \"timeout\": 180,
   // Codex verifies plan against actual source files
   \"source_verify\": true,
   // Auto-reject first plan for deep revision (skips Codex on round 1)

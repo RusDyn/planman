@@ -59,7 +59,7 @@ class TestConfigDefaults(unittest.TestCase):
             self.assertEqual(cfg.rubric, DEFAULT_RUBRIC)
             self.assertEqual(cfg.codex_path, "codex")
             self.assertFalse(cfg.verbose)
-            self.assertEqual(cfg.timeout, 120)
+            self.assertEqual(cfg.timeout, 180)
         finally:
             os.environ.update(saved)
 

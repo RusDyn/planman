@@ -28,7 +28,7 @@ def _make_config(**overrides):
         "rubric": "Score it 1-10.",
         "codex_path": "codex",
         "verbose": False,
-        "timeout": 120,
+        "timeout": 180,
         "stress_test": False,
         "stress_test_prompt": "",
         "context": "",
@@ -345,13 +345,13 @@ class TestPromptLengthLimit(unittest.TestCase):
             stdout=json.dumps(VALID_RESULT),
             stderr="",
         )
-        config = _make_config(timeout=120)
+        config = _make_config(timeout=180)
         large_plan = "x" * 600_000
         result, error = evaluate_plan(large_plan, config)
         self.assertIsNone(error)
-        # Verify timeout was scaled: min(120 * 1.5, 110) = 110 (clamped below hook timeout)
+        # Verify timeout was scaled: min(180 * 1.5, 270) = 270 (capped at _HOOK_BUDGET)
         call_kwargs = mock_run.call_args[1]
-        self.assertEqual(call_kwargs["timeout"], 110)
+        self.assertEqual(call_kwargs["timeout"], 270)
 
     @patch("evaluator.subprocess.run")
     @patch("evaluator.check_codex_installed", return_value=True)

@@ -18,7 +18,7 @@
   // Debug output to stderr + log file
   "verbose": true,
   // Seconds for codex subprocess (1-600)
-  "timeout": 90,
+  "timeout": 180,
   // Auto-reject first plan for deep revision (skips Codex on round 1)
   "stress_test": true,
   // Custom first-round rejection message (empty = built-in)

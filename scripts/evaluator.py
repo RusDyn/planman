@@ -91,10 +91,11 @@ def evaluate_plan(plan_text, config, previous_feedback=None, round_number=1, cwd
     if len(prompt) > _MAX_PROMPT_SIZE:
         return None, f"prompt too large ({len(prompt) // 1024}KB > 2MB). Reduce max_rounds or plan size."
 
-    # Scale timeout for large prompts (>500KB get 1.5x, capped below hook timeout)
-    effective_timeout = config.timeout
+    # Cap below hook timeout (300s hook − 30s margin = 270s max)
+    _HOOK_BUDGET = 270
+    effective_timeout = min(config.timeout, _HOOK_BUDGET)
     if len(prompt) > 500_000:
-        effective_timeout = min(int(config.timeout * 1.5), 110)
+        effective_timeout = min(int(config.timeout * 1.5), _HOOK_BUDGET)
 
     schema_path = os.path.join(PLUGIN_ROOT, "schemas", "evaluation.json")
 
