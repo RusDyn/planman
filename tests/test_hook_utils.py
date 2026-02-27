@@ -114,24 +114,25 @@ class TestRunEvaluation(unittest.TestCase):
         self.assertIn("needs 7", r2["reason"])
 
     @patch("hook_utils.evaluate_plan")
-    def test_max_rounds_blocks(self, mock_eval):
-        """Exceeding max rounds → block + reason mentions 'human' + stays blocked."""
+    def test_max_rounds_passes_through(self, mock_eval):
+        """Exceeding max rounds → pass through + system message informs user."""
         from hook_utils import run_evaluation
         mock_eval.return_value = (LOW_SCORE_RESULT, None)
         config = _make_config(max_rounds=1)
 
         # Round 1: mandatory rejection
         run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
-        # Round 2: over limit
+        # Round 2: over limit → passes through
         r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
-        self.assertEqual(r2["action"], "block")
-        self.assertIn("Max evaluation rounds", r2["reason"])
-        self.assertIn("Please review", r2["reason"])
+        self.assertEqual(r2["action"], "pass")
+        self.assertIn("Max evaluation rounds", r2["system_message"])
+        self.assertIn("threshold", r2["system_message"])
+        self.assertIsNone(r2["reason"])
 
-        # Round 3 (retry): should still be blocked at max_rounds
+        # Round 3 (retry): should still pass through
         r3 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
-        self.assertEqual(r3["action"], "block")
-        self.assertIn("Max evaluation rounds", r3["reason"])
+        self.assertEqual(r3["action"], "pass")
+        self.assertIn("Max evaluation rounds", r3["system_message"])
 
     @patch("hook_utils.evaluate_plan")
     def test_round_continues_after_pass(self, mock_eval):

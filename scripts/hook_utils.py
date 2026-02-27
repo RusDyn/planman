@@ -146,18 +146,18 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     state = update_for_plan(state, plan_text, plan_path)
     log(f"round {state['round_count']}/{config.max_rounds}", config, cwd)
 
-    # Check round limit — block for human decision
+    # Check round limit — pass through and let the user decide
     if state["round_count"] > config.max_rounds:
-        log("max rounds exceeded — blocking for human decision", config, cwd)
+        log("max rounds exceeded — passing through for human decision", config, cwd)
         return {
-            "action": "block",
-            "reason": (
+            "action": "pass",
+            "reason": None,
+            "system_message": (
                 f"Planman: Max evaluation rounds ({config.max_rounds}) reached. "
-                f"Last score was {state.get('last_score', '?')}/10. "
-                "The plan has not met the quality threshold after multiple revisions. "
-                "Please review and decide whether to proceed."
+                f"Last score was {state.get('last_score', '?')}/10 "
+                f"(threshold: {config.threshold}). "
+                "Proceeding without approval — please review the plan yourself."
             ),
-            "system_message": None,
         }
 
     # Stress-test mode: skip Codex on round 1, reject with custom prompt
