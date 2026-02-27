@@ -14,9 +14,13 @@ Run these commands and report the results:
 2. Show effective configuration by running:
    ```bash
    python3 -c "
-   import sys, os; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts')
+   import json, sys, os; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts')
+   plugin_json = os.path.join('${CLAUDE_PLUGIN_ROOT}', '.claude-plugin', 'plugin.json')
+   with open(plugin_json) as f:
+       ver = json.load(f)['version']
    from config import load_config
    c = load_config(cwd=os.getcwd())
+   print(f'version:    {ver}')
    print(f'enabled:    {c.enabled}')
    print(f'threshold:  {c.threshold}/10')
    print(f'max_rounds: {c.max_rounds}')

@@ -86,22 +86,31 @@ def _find_plan_file(session_id, cwd):
     except (OSError, json.JSONDecodeError, KeyError):
         pass
 
-    # Fallback: scan .claude/plans/ under cwd for most recently modified .md
-    if cwd:
-        plans_dir = os.path.join(cwd, ".claude", "plans")
-        if os.path.isdir(plans_dir):
-            md_files = glob.glob(os.path.join(plans_dir, "*.md"))
-            if md_files:
-                latest = max(md_files, key=os.path.getmtime)
-                try:
-                    if os.path.getsize(latest) > _MAX_PLAN_SIZE:
-                        return None, None, f"Plan file too large (>1 MB): {latest}"
-                    with open(latest, "r", encoding="utf-8") as f:
-                        text = f.read()
-                    if text.strip():
-                        return latest, text, None
-                except OSError:
-                    pass
+    # Fallback: scan .claude/plans/ directories for most recently modified .md
+    # Check both the project-local directory and the home directory
+    home_plans = os.path.expanduser("~/.claude/plans")
+    cwd_plans = os.path.join(cwd, ".claude", "plans") if cwd else None
+    scan_dirs = []
+    if cwd_plans and os.path.isdir(cwd_plans):
+        scan_dirs.append(cwd_plans)
+    if os.path.isdir(home_plans) and (not cwd_plans or os.path.realpath(home_plans) != os.path.realpath(cwd_plans)):
+        scan_dirs.append(home_plans)
+
+    md_files = []
+    for plans_dir in scan_dirs:
+        md_files.extend(glob.glob(os.path.join(plans_dir, "*.md")))
+
+    if md_files:
+        latest = max(md_files, key=os.path.getmtime)
+        try:
+            if os.path.getsize(latest) > _MAX_PLAN_SIZE:
+                return None, None, f"Plan file too large (>1 MB): {latest}"
+            with open(latest, "r", encoding="utf-8") as f:
+                text = f.read()
+            if text.strip():
+                return latest, text, None
+        except OSError:
+            pass
 
     return None, None, None
 
@@ -144,9 +153,11 @@ def _main():
             log(f"plan skipped: {skip_reason}", config, cwd)
             _output_allow(system_message=f"Planman: {skip_reason}")
         else:
-            log("no plan file found — allowing ExitPlanMode", config, cwd)
-            _output_allow()
-    return
+            log("no plan file found — blocking ExitPlanMode", config, cwd)
+            _output_block(
+                reason="No plan file found. Write your plan to the plan file before calling ExitPlanMode.",
+            )
+        return
 
     log(f"evaluating plan from {plan_path}", config, cwd)
 
