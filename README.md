@@ -111,7 +111,8 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 | `custom_rubric` | `PLANMAN_RUBRIC` | *(built-in)* | Custom evaluation rubric |
 | `codex_path` | `PLANMAN_CODEX_PATH` | `codex` | Path to codex binary (rejects `..` paths) |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
-| `timeout` | `PLANMAN_TIMEOUT` | `90` | Seconds for codex subprocess (1-600; keep ≤ 90s, hook timeout is 120s) |
+| `timeout` | `PLANMAN_TIMEOUT` | `120` | Seconds for codex subprocess (1-600; scaled up for large prompts, clamped below hook timeout) |
+| `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Codex verifies plan against actual source files |
 | `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt (skips Codex on round 1) |
 | `stress_test_prompt` | `PLANMAN_STRESS_TEST_PROMPT` | *(built-in)* | Custom first-round rejection message |
 | `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context injected into evaluation prompt |
@@ -196,7 +197,6 @@ Session state is stored in the system temp directory (run `python3 -c "import te
   - `state.py` — multi-round session state
   - `config.py` — configuration loader
   - `clear_state.py` — session cleanup utility
-  - `run_hook.py` — hook entry point
 - `schemas/` — JSON output schema for codex structured output
 - `commands/` — slash commands (`/planman:status`, `/planman:help`, `/planman:init`, `/planman:clear`)
 

@@ -20,8 +20,6 @@ import glob
 import json
 import os
 import sys
-import tempfile
-import time
 
 # Add scripts directory to path for sibling imports
 _scripts_dir = os.path.dirname(os.path.abspath(__file__))
@@ -30,15 +28,7 @@ if _scripts_dir not in sys.path:
 
 from config import load_config
 from evaluator import check_codex_installed
-from hook_utils import log, run_evaluation
-
-# Session marker path template (written by post_tool_hook.py)
-_MARKER_TEMPLATE = os.path.join(tempfile.gettempdir(), "planman-plan-{session_id}.json")
-
-
-def _safe_session_id(session_id):
-    """Sanitize session_id for use in file paths."""
-    return "".join(c for c in session_id if c.isalnum() or c in "-_")
+from hook_utils import MARKER_TEMPLATE, log, run_evaluation, safe_session_id
 
 
 def _output_block(reason, system_message=None):
@@ -66,8 +56,8 @@ def _find_plan_file(session_id, cwd):
     is a human-readable message when the plan was found but rejected
     (e.g. oversized), or None on success / when no plan exists at all.
     """
-    safe_id = _safe_session_id(session_id)
-    marker_path = _MARKER_TEMPLATE.format(session_id=safe_id)
+    safe_id = safe_session_id(session_id)
+    marker_path = MARKER_TEMPLATE.format(session_id=safe_id)
 
     _MAX_PLAN_SIZE = 1_000_000  # 1 MB — reject absurdly large files
 
@@ -138,10 +128,12 @@ def _main():
     if not config.enabled:
         log("disabled via config", config, cwd)
         _output_allow()
+        return
 
     if not check_codex_installed(config.codex_path):
         log("codex CLI not installed — passing through", config, cwd)
         _output_allow()
+        return
 
     session_id = hook_input.get("session_id", "default")
 
@@ -172,11 +164,14 @@ def _main():
 
     if action == "block":
         _output_block(reason=reason, system_message=sys_msg)
+        return
     elif action == "pass":
         _output_allow(system_message=sys_msg)
+        return
     else:
         # "skip" — not detected as a plan (unlikely for .claude/plans/ files)
         _output_allow(system_message=sys_msg)
+        return
 
 
 def main():

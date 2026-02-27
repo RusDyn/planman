@@ -207,6 +207,16 @@ class TestStatePath(unittest.TestCase):
         self.assertIn("planman-abc", path)
         self.assertNotIn("/", os.path.basename(path).replace("planman-", "").replace(".json", ""))
 
+    def test_empty_session_id_uses_default(self):
+        """Empty session_id should use 'default' to avoid collision."""
+        path = _state_path("")
+        self.assertIn("planman-default", path)
+
+    def test_special_chars_session_id_uses_default(self):
+        """Session ID with only special chars should use 'default'."""
+        path = _state_path("///...")
+        self.assertIn("planman-default", path)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,7 @@ import time
 def _state_path(session_id):
     """Return the state file path for a session."""
     safe_id = "".join(c for c in session_id if c.isalnum() or c in "-_")
-    return os.path.join(tempfile.gettempdir(), f"planman-{safe_id}.json")
+    return os.path.join(tempfile.gettempdir(), f"planman-{safe_id or 'default'}.json")
 
 
 def compute_plan_hash(plan_text):

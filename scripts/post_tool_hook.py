@@ -22,13 +22,12 @@ import tempfile
 import time
 from pathlib import PurePath
 
-# Session marker path template
-_MARKER_TEMPLATE = os.path.join(tempfile.gettempdir(), "planman-plan-{session_id}.json")
+# Add scripts directory to path for sibling imports
+_scripts_dir = os.path.dirname(os.path.abspath(__file__))
+if _scripts_dir not in sys.path:
+    sys.path.insert(0, _scripts_dir)
 
-
-def _safe_session_id(session_id):
-    """Sanitize session_id for use in file paths."""
-    return "".join(c for c in session_id if c.isalnum() or c in "-_")
+from hook_utils import MARKER_TEMPLATE, safe_session_id
 
 
 def _main():
@@ -64,13 +63,12 @@ def _main():
         sys.exit(0)
 
     # Record plan file path for the PreToolUse(ExitPlanMode) hook
-    session_id = _safe_session_id(hook_input.get("session_id", "default"))
-    marker_path = _MARKER_TEMPLATE.format(session_id=session_id)
+    session_id = safe_session_id(hook_input.get("session_id", "default"))
+    marker_path = MARKER_TEMPLATE.format(session_id=session_id)
 
     try:
         marker = {"plan_file_path": file_path, "timestamp": time.time()}
-        import tempfile as _tmpmod
-        tmp_fd, tmp_path = _tmpmod.mkstemp(
+        tmp_fd, tmp_path = tempfile.mkstemp(
             dir=os.path.dirname(marker_path), prefix="planman-marker-tmp-"
         )
         try:

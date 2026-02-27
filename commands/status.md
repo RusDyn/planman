@@ -30,7 +30,9 @@ Run these commands and report the results:
    print(f'verbose:    {c.verbose}')
    print(f'timeout:    {c.timeout}s')
    print(f'rubric:     {\"custom\" if c.rubric != __import__(\"config\").DEFAULT_RUBRIC else \"built-in\"}')
+   print(f'source_verify: {c.source_verify}')
    print(f'stress_test: {c.stress_test}')
+   print(f'stress_test_prompt: {c.stress_test_prompt[:50] + "..." if len(c.stress_test_prompt) > 50 else c.stress_test_prompt or "(built-in)"}')
    print(f'context:     {c.context or \"(none)\"}')
    "
    ```

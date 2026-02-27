@@ -46,7 +46,8 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 | `custom_rubric` | `PLANMAN_RUBRIC` | *(built-in)* | Custom evaluation rubric |
 | `codex_path` | `PLANMAN_CODEX_PATH` | `codex` | Path to codex binary |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
-| `timeout` | `PLANMAN_TIMEOUT` | `90` | Seconds for codex subprocess |
+| `timeout` | `PLANMAN_TIMEOUT` | `120` | Seconds for codex subprocess |
+| `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Codex verifies plan against actual source files |
 | `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt |
 | `stress_test_prompt` | `PLANMAN_STRESS_TEST_PROMPT` | *(built-in)* | Custom first-round rejection message |
 | `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context for evaluator |

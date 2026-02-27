@@ -57,6 +57,7 @@
     "strengths": {
       "type": "array",
       "items": { "type": "string" },
+      "minItems": 1,
       "description": "1-3 things the plan does well."
     }
   },

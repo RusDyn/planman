@@ -28,10 +28,11 @@ def _make_config(**overrides):
         "rubric": "Score it 1-10.",
         "codex_path": "codex",
         "verbose": False,
-        "timeout": 90,
+        "timeout": 120,
         "stress_test": False,
         "stress_test_prompt": "",
         "context": "",
+        "source_verify": True,
     }
     defaults.update(overrides)
     return Config(**defaults)
@@ -84,6 +85,23 @@ class TestBuildPrompt(unittest.TestCase):
         prompt = build_prompt("My plan", "Score it.", context="")
         self.assertNotIn("Project Context", prompt)
 
+    def test_source_verify_enabled_by_default(self):
+        prompt = build_prompt("My plan", "Score it.", round_number=1)
+        self.assertIn("## Source Verification", prompt)
+        self.assertIn("read-only access to the project filesystem", prompt)
+        self.assertIn("cat <path>", prompt)
+
+    def test_source_verify_disabled(self):
+        prompt = build_prompt("My plan", "Score it.", round_number=1, source_verify=False)
+        self.assertNotIn("Source Verification", prompt)
+
+    def test_source_verify_before_feedback(self):
+        """Source verification should appear before previous feedback."""
+        prompt = build_prompt("My plan", "Score it.", "Fix X", round_number=2, source_verify=True)
+        verify_pos = prompt.index("Source Verification")
+        feedback_pos = prompt.index("Previous Feedback")
+        self.assertLess(verify_pos, feedback_pos)
+
 
 class TestParseCodexOutput(unittest.TestCase):
     def test_valid_output(self):
@@ -131,6 +149,49 @@ class TestParseCodexOutput(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("breakdown.completeness", error)
 
+    def test_score_mismatch_rejected(self):
+        """Score must equal sum of breakdown values."""
+        data = dict(VALID_RESULT, score=9)  # sum is 8
+        result, error = parse_codex_output(json.dumps(data))
+        self.assertIsNone(result)
+        self.assertIn("score mismatch", error)
+
+    def test_score_matches_breakdown_accepted(self):
+        """Score matching breakdown sum passes."""
+        result, error = parse_codex_output(json.dumps(VALID_RESULT))
+        self.assertIsNone(error)
+        self.assertEqual(result["score"], 8)
+
+    def test_empty_strengths_rejected(self):
+        """No strengths → rejected."""
+        data = dict(VALID_RESULT, strengths=[])
+        result, error = parse_codex_output(json.dumps(data))
+        self.assertIsNone(result)
+        self.assertIn("no strengths listed", error)
+
+    def test_empty_weaknesses_with_low_score_rejected(self):
+        """Score < 10 with no weaknesses → rejected."""
+        data = dict(VALID_RESULT, weaknesses=[])
+        result, error = parse_codex_output(json.dumps(data))
+        self.assertIsNone(result)
+        self.assertIn("no weaknesses listed", error)
+
+    def test_empty_weaknesses_with_perfect_score_accepted(self):
+        """Score = 10 with no weaknesses → accepted."""
+        data = {
+            "score": 10,
+            "breakdown": {
+                "completeness": 2, "correctness": 2, "sequencing": 2,
+                "risk_awareness": 2, "clarity": 2,
+            },
+            "weaknesses": [],
+            "suggestions": [],
+            "strengths": ["Perfect plan"],
+        }
+        result, error = parse_codex_output(json.dumps(data))
+        self.assertIsNone(error)
+        self.assertEqual(result["score"], 10)
+
 
 class TestEvaluatePlan(unittest.TestCase):
     def setUp(self):
@@ -151,6 +212,39 @@ class TestEvaluatePlan(unittest.TestCase):
         result, error = evaluate_plan("My plan", config)
         self.assertIsNone(error)
         self.assertEqual(result["score"], 8)
+
+    @patch("evaluator.subprocess.run")
+    @patch("evaluator.check_codex_installed", return_value=True)
+    def test_stdin_mode_used(self, mock_check, mock_run):
+        """Prompt is passed via stdin, not as CLI arg."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(VALID_RESULT),
+            stderr="",
+        )
+        config = _make_config()
+        evaluate_plan("My plan", config)
+        cmd = mock_run.call_args[0][0]
+        # Should use 'exec -' (stdin mode), not 'exec <prompt>'
+        self.assertIn("-", cmd)
+        self.assertNotIn("My plan", cmd)
+        # Prompt passed via input kwarg
+        call_kwargs = mock_run.call_args[1]
+        self.assertIn("My plan", call_kwargs.get("input", ""))
+
+    @patch("evaluator.subprocess.run")
+    @patch("evaluator.check_codex_installed", return_value=True)
+    def test_ephemeral_flag_passed(self, mock_check, mock_run):
+        """--ephemeral flag prevents session file accumulation."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(VALID_RESULT),
+            stderr="",
+        )
+        config = _make_config()
+        evaluate_plan("My plan", config)
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("--ephemeral", cmd)
 
     @patch("evaluator.subprocess.run")
     @patch("evaluator.check_codex_installed", return_value=True)
@@ -234,13 +328,30 @@ class TestPromptLengthLimit(unittest.TestCase):
 
     @patch("evaluator.check_codex_installed", return_value=True)
     def test_oversized_prompt_returns_error(self, mock_check):
-        """Prompt > 500KB → error without calling subprocess."""
+        """Prompt > 2MB → error without calling subprocess."""
         config = _make_config()
-        huge_plan = "x" * 600_000
+        huge_plan = "x" * 2_100_000
         result, error = evaluate_plan(huge_plan, config)
         self.assertIsNone(result)
         self.assertIn("too large", error)
-        self.assertIn("max_rounds", error)
+        self.assertIn("2MB", error)
+
+    @patch("evaluator.subprocess.run")
+    @patch("evaluator.check_codex_installed", return_value=True)
+    def test_large_prompt_gets_scaled_timeout(self, mock_check, mock_run):
+        """Prompt > 500KB but < 2MB → proceeds with scaled timeout."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(VALID_RESULT),
+            stderr="",
+        )
+        config = _make_config(timeout=120)
+        large_plan = "x" * 600_000
+        result, error = evaluate_plan(large_plan, config)
+        self.assertIsNone(error)
+        # Verify timeout was scaled: min(120 * 1.5, 110) = 110 (clamped below hook timeout)
+        call_kwargs = mock_run.call_args[1]
+        self.assertEqual(call_kwargs["timeout"], 110)
 
     @patch("evaluator.subprocess.run")
     @patch("evaluator.check_codex_installed", return_value=True)

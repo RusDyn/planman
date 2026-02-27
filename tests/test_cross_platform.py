@@ -39,20 +39,15 @@ class TestTempPathConsistency(unittest.TestCase):
         )
 
     def test_marker_template_uses_tempdir(self):
-        """post_tool_hook and pre_exit_plan_hook markers should use tempdir."""
-        import post_tool_hook
-        import pre_exit_plan_hook
+        """Shared MARKER_TEMPLATE should use tempdir."""
+        from hook_utils import MARKER_TEMPLATE
         tmpdir = tempfile.gettempdir()
-        for mod_name, mod in [("post_tool_hook", post_tool_hook),
-                               ("pre_exit_plan_hook", pre_exit_plan_hook)]:
-            template = mod._MARKER_TEMPLATE
-            # Template has {session_id} placeholder — format it first
-            resolved = template.format(session_id="test")
-            self.assertTrue(
-                resolved.startswith(tmpdir),
-                f"{mod_name}._MARKER_TEMPLATE resolved to {resolved}, "
-                f"expected to start with {tmpdir}",
-            )
+        resolved = MARKER_TEMPLATE.format(session_id="test")
+        self.assertTrue(
+            resolved.startswith(tmpdir),
+            f"MARKER_TEMPLATE resolved to {resolved}, "
+            f"expected to start with {tmpdir}",
+        )
 
 
 class TestPathSegmentDetection(unittest.TestCase):

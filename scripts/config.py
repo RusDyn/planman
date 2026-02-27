@@ -37,10 +37,11 @@ DEFAULTS = {
     "custom_rubric": "",
     "codex_path": "codex",
     "verbose": False,
-    "timeout": 90,
+    "timeout": 120,
     "stress_test": False,
     "stress_test_prompt": "",
     "context": "",
+    "source_verify": True,
 }
 
 _BOOL_TRUTHY = {"true", "1", "yes", "on"}
@@ -90,6 +91,7 @@ class Config:
         "stress_test",
         "stress_test_prompt",
         "context",
+        "source_verify",
     )
 
     def __init__(self, **kwargs):
@@ -105,6 +107,7 @@ class Config:
         self.stress_test = kwargs.get("stress_test", DEFAULTS["stress_test"])
         self.stress_test_prompt = kwargs.get("stress_test_prompt", "") or DEFAULT_STRESS_TEST_PROMPT
         self.context = kwargs.get("context", "")
+        self.source_verify = kwargs.get("source_verify", DEFAULTS["source_verify"])
 
 
 def _strip_jsonc_comments(text):
@@ -151,6 +154,7 @@ def _load_env_overrides():
         "PLANMAN_STRESS_TEST": ("stress_test", _coerce_bool),
         "PLANMAN_STRESS_TEST_PROMPT": ("stress_test_prompt", str),
         "PLANMAN_CONTEXT": ("context", str),
+        "PLANMAN_SOURCE_VERIFY": ("source_verify", _coerce_bool),
     }
     for env_var, (key, coerce) in env_map.items():
         val = os.environ.get(env_var)
@@ -209,4 +213,5 @@ def load_config(cwd=None):
         stress_test=merged["stress_test"],
         stress_test_prompt=merged.get("stress_test_prompt", ""),
         context=merged.get("context", ""),
+        source_verify=_coerce_bool(merged.get("source_verify", True), "source_verify"),
     )

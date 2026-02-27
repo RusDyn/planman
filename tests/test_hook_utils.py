@@ -52,9 +52,10 @@ def _make_config(**overrides):
         "rubric": "Score it 1-10.",
         "codex_path": "codex",
         "verbose": False,
-        "timeout": 90,
+        "timeout": 120,
         "stress_test": False,
         "stress_test_prompt": "Stress-test default prompt",
+        "source_verify": True,
     }
     defaults.update(overrides)
     return Config(**defaults)
@@ -372,10 +373,11 @@ class TestPlanFileSizeLimit(unittest.TestCase):
     def test_oversized_plan_via_marker_returns_none(self):
         """Plan file > 1MB referenced by marker → returns (None, None, reason)."""
         import tempfile as _tmpmod
-        from pre_exit_plan_hook import _find_plan_file, _safe_session_id, _MARKER_TEMPLATE
+        from pre_exit_plan_hook import _find_plan_file
+        from hook_utils import safe_session_id, MARKER_TEMPLATE
 
         session_id = f"test-size-{os.getpid()}"
-        safe_id = _safe_session_id(session_id)
+        safe_id = safe_session_id(session_id)
 
         # Create an oversized plan file
         with _tmpmod.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
@@ -383,7 +385,7 @@ class TestPlanFileSizeLimit(unittest.TestCase):
             oversized_path = f.name
 
         # Create marker pointing to it
-        marker_path = _MARKER_TEMPLATE.format(session_id=safe_id)
+        marker_path = MARKER_TEMPLATE.format(session_id=safe_id)
         with open(marker_path, "w") as f:
             json.dump({"plan_file_path": oversized_path}, f)
 
@@ -403,16 +405,17 @@ class TestPlanFileSizeLimit(unittest.TestCase):
     def test_normal_size_plan_accepted(self):
         """Plan file under 1MB → returns content."""
         import tempfile as _tmpmod
-        from pre_exit_plan_hook import _find_plan_file, _safe_session_id, _MARKER_TEMPLATE
+        from pre_exit_plan_hook import _find_plan_file
+        from hook_utils import safe_session_id, MARKER_TEMPLATE
 
         session_id = f"test-size-ok-{os.getpid()}"
-        safe_id = _safe_session_id(session_id)
+        safe_id = safe_session_id(session_id)
 
         with _tmpmod.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
             f.write("# Plan\n1. Step one\n2. Step two")
             plan_file = f.name
 
-        marker_path = _MARKER_TEMPLATE.format(session_id=safe_id)
+        marker_path = MARKER_TEMPLATE.format(session_id=safe_id)
         with open(marker_path, "w") as f:
             json.dump({"plan_file_path": plan_file}, f)
 
@@ -429,13 +432,12 @@ class TestPlanFileSizeLimit(unittest.TestCase):
                 pass
 
 
-class TestScoreMismatchAccepted(unittest.TestCase):
-    """Test that score doesn't need to equal breakdown sum (design choice)."""
+class TestScoreMismatchRejected(unittest.TestCase):
+    """Test that score mismatch is caught by parse_codex_output validation."""
 
-    @patch("hook_utils.evaluate_plan")
-    def test_score_mismatch_still_accepted(self, mock_eval):
-        """score=7 with breakdown sum=8 → accepted on round 2 (no validation)."""
-        from hook_utils import run_evaluation
+    def test_score_mismatch_returns_error(self):
+        """score=7 with breakdown sum=8 → parse error (v0.3.0+)."""
+        from evaluator import parse_codex_output
         mismatched_result = {
             "score": 7,
             "breakdown": {
@@ -445,24 +447,66 @@ class TestScoreMismatchAccepted(unittest.TestCase):
                 "risk_awareness": 1,
                 "clarity": 1,
             },
-            "weaknesses": [],
-            "suggestions": [],
+            "weaknesses": ["Minor issue"],
+            "suggestions": ["Fix it"],
             "strengths": ["Good plan"],
         }
-        mock_eval.return_value = (mismatched_result, None)
-        config = _make_config(threshold=7)
+        result, error = parse_codex_output(json.dumps(mismatched_result))
+        self.assertIsNone(result)
+        self.assertIn("score mismatch", error)
+        self.assertIn("score=7", error)
+        self.assertIn("sum=8", error)
 
-        session_id = f"test-mismatch-{os.getpid()}"
-        try:
-            # Round 1: mandatory rejection
-            r1 = run_evaluation(PLAN_TEXT, session_id, config, plan_path="/test.md")
-            self.assertEqual(r1["action"], "block")
 
-            # Round 2: score=7 >= threshold=7 → pass despite sum=8
-            r2 = run_evaluation(PLAN_TEXT, session_id, config, plan_path="/test.md")
-            self.assertEqual(r2["action"], "pass")
-        finally:
-            clear_state(session_id)
+class TestSafeSessionId(unittest.TestCase):
+    """Test shared safe_session_id from hook_utils."""
+
+    def test_normal_id(self):
+        from hook_utils import safe_session_id
+        self.assertEqual(safe_session_id("abc-123_def"), "abc-123_def")
+
+    def test_empty_string_returns_default(self):
+        from hook_utils import safe_session_id
+        self.assertEqual(safe_session_id(""), "default")
+
+    def test_special_chars_returns_default(self):
+        from hook_utils import safe_session_id
+        self.assertEqual(safe_session_id("///..."), "default")
+
+    def test_strips_dangerous_chars(self):
+        from hook_utils import safe_session_id
+        self.assertEqual(safe_session_id("a/b/../c"), "abc")
+
+    def test_long_input_truncated(self):
+        from hook_utils import safe_session_id
+        long_id = "a" * 10_000
+        result = safe_session_id(long_id)
+        self.assertEqual(len(result), 100)
+        self.assertEqual(result, "a" * 100)
+
+
+class TestLogAlwaysToFile(unittest.TestCase):
+    """Test that log() always writes to file, even when verbose=false."""
+
+    def test_log_writes_to_file_when_not_verbose(self):
+        from hook_utils import log
+        import tempfile as _tmpmod
+
+        tmpdir = _tmpmod.mkdtemp()
+        claude_dir = os.path.join(tmpdir, ".claude")
+        os.makedirs(claude_dir, exist_ok=True)
+
+        config = _make_config(verbose=False)
+        log("test non-verbose log entry", config, cwd=tmpdir)
+
+        log_path = os.path.join(claude_dir, "planman.log")
+        self.assertTrue(os.path.exists(log_path))
+        with open(log_path) as f:
+            content = f.read()
+        self.assertIn("test non-verbose log entry", content)
+
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.py ${CLAUDE_PLUGIN_ROOT}/scripts/post_tool_hook.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/post_tool_hook.py",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.py ${CLAUDE_PLUGIN_ROOT}/scripts/post_tool_hook.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/post_tool_hook.py",
             "timeout": 10
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.py ${CLAUDE_PLUGIN_ROOT}/scripts/pre_exit_plan_hook.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/pre_exit_plan_hook.py",
             "timeout": 120
           }
         ]

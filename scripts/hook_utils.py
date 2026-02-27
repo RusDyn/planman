@@ -3,7 +3,7 @@
 Contains the common evaluation flow:
   detect plan -> load state -> check round limit -> assess -> format output
 
-Used by pre_exit_plan_hook.py (plan mode).
+Used by pre_exit_plan_hook.py and post_tool_hook.py.
 """
 
 import json
@@ -28,6 +28,17 @@ from state import (
     update_for_plan,
 )
 
+# ── Shared constants used by both hooks ──────────────────────────────
+
+MARKER_TEMPLATE = os.path.join(tempfile.gettempdir(), "planman-plan-{session_id}.json")
+
+
+def safe_session_id(session_id):
+    """Sanitize session_id for use in file paths. Falls back to 'default' if empty."""
+    safe = "".join(c for c in session_id if c.isalnum() or c in "-_")
+    safe = safe[:100]
+    return safe or "default"
+
 
 def _log_to_file(msg, cwd):
     """Append a timestamped message to planman.log (race-safe)."""
@@ -51,10 +62,10 @@ def _log_to_file(msg, cwd):
 
 
 def log(msg, config, cwd=None):
-    """Log to stderr if verbose; also append to planman.log file."""
+    """Always log to file; also print to stderr if verbose."""
+    _log_to_file(msg, cwd)
     if config.verbose:
         print(f"[planman] {msg}", file=sys.stderr)
-        _log_to_file(msg, cwd)
 
 
 def format_feedback(data, threshold, round_num, max_rounds, first_round=False):
