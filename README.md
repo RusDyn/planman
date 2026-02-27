@@ -1,6 +1,18 @@
-# planman
+# The Man with The Plan
 
-An external AI plan evaluator plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+<p align="center">
+  <img src="assets/planman-hero.png" alt="Planman — The Man With The Plan" width="600">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python 3.8+">
+  <img src="https://img.shields.io/badge/claude--code-plugin-blueviolet.svg" alt="Claude Code Plugin">
+</p>
+
+A quality gate for AI-generated plans. This [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin sends implementation plans to [OpenAI Codex CLI](https://github.com/openai/codex) for independent scoring, automatically rejecting low-quality plans with actionable feedback — so Claude iterates before you review.
+
+> *"Every plan deserves a second opinion."*
 
 When Claude presents an implementation plan, planman intercepts it, sends it to [OpenAI Codex CLI](https://github.com/openai/codex) for scoring, and rejects low-scoring plans with actionable feedback. Claude revises and re-presents. After a configurable number of rounds, you decide.
 
@@ -30,6 +42,24 @@ PreToolUse(ExitPlanMode) — evaluates plan via codex when Claude exits plan mod
 
 **Deterministic:** Files in `.claude/plans/` are always treated as plans — no LLM-based plan detection.
 
+## Quick Start
+
+1. Install [Codex CLI](https://github.com/openai/codex):
+   ```bash
+   npm install -g @openai/codex
+   ```
+2. Authenticate: run `codex` once and log in via browser
+3. Add planman to Claude Code:
+   ```
+   /plugin marketplace add RusDyn/planman
+   /plugin install planman@planman
+   ```
+4. Restart Claude Code
+
+That's it. The next time Claude exits plan mode, planman evaluates the plan and blocks with feedback if the score is below threshold (default 7/10). Run `/planman:init` to customize settings.
+
+> *"You're four steps from better plans."*
+
 ## Prerequisites
 
 1. **OpenAI Codex CLI**:
@@ -40,6 +70,8 @@ PreToolUse(ExitPlanMode) — evaluates plan via codex when Claude exits plan mod
 2. **ChatGPT subscription** (Plus, Pro, or Team)
 
 3. **Login once**: Run `codex` and authenticate via browser
+
+4. **Claude Code** with [plugin support](https://docs.anthropic.com/en/docs/claude-code)
 
 ## Installation
 
@@ -86,15 +118,11 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 
 When `stress_test` is enabled, `max_rounds` is automatically clamped to a minimum of 2.
 
-### Quick Start
-
-```
-/planman:init
-```
-
-Creates `.claude/planman.jsonc` with all available settings and their defaults. Edit the values you want to change — omitted or empty string values use built-in defaults.
+Run `/planman:init` to generate `.claude/planman.jsonc` with all settings and inline documentation.
 
 ## Scoring Rubric
+
+> *"A plan that survives scrutiny is a plan worth building."*
 
 Plans are scored on 5 criteria (0-2 each, 10 max):
 
@@ -123,6 +151,8 @@ Or in `.claude/planman.jsonc`:
 ```
 
 ## Commands
+
+All commands use the `planman:` namespace prefix:
 
 | Command | Description |
 |---------|-------------|
@@ -170,6 +200,14 @@ Session state is stored in the system temp directory (run `python3 -c "import te
 - `schemas/` — JSON output schema for codex structured output
 - `commands/` — slash commands (`/planman:status`, `/planman:help`, `/planman:init`, `/planman:clear`)
 
+## Uninstalling
+
+```
+/plugin uninstall planman@planman
+```
+
+This removes planman's hooks and commands. Your `.claude/planman.jsonc` config file is preserved — delete it manually if no longer needed.
+
 ## Troubleshooting
 
 ### "Nothing happens" when Claude presents a plan
@@ -207,6 +245,25 @@ python3 -m pytest tests/ -v
 python3 -m unittest discover tests/ -v
 ```
 
+## Contributing
+
+> *"Got a plan to make planman better?"*
+
+To get started:
+
+1. Fork the repo and clone locally
+2. Install test runner: `pip install pytest`
+3. Run tests: `python3 -m pytest tests/ -v`
+4. Make your changes — the plugin has **zero pip dependencies** (stdlib only, Python 3.8+), please keep it that way
+5. Open a pull request against `main`
+
+Please open an issue first for significant changes so we can discuss the approach.
+
+## Support
+
+- **Bug reports & feature requests**: [GitHub Issues](https://github.com/RusDyn/planman/issues)
+- **Plugin docs**: [Claude Code Plugins](https://docs.anthropic.com/en/docs/claude-code)
+
 ## License
 
-MIT
+[MIT](LICENSE)

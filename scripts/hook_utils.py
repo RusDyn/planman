@@ -21,7 +21,6 @@ except ImportError:
 from config import load_config
 from evaluator import check_codex_installed, evaluate_plan
 from state import (
-    clear_state,
     compute_plan_hash,
     load_state,
     record_feedback,
@@ -150,7 +149,6 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     # Check round limit — block for human decision
     if state["round_count"] > config.max_rounds:
         log("max rounds exceeded — blocking for human decision", config, cwd)
-        clear_state(session_id)
         return {
             "action": "block",
             "reason": (
@@ -223,10 +221,13 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
         }
 
     if assessment_score >= config.threshold:
-        # Plan passes (round >= 2)
+        # Plan passes (round >= 2) — preserve state but null feedback
+        state = record_feedback(state, assessment_score, None, result.get("breakdown"))
+        try:
+            save_state(state)
+        except OSError as e:
+            log(f"failed to save state: {e}", config, cwd)
         log(f"plan accepted: {assessment_score}/10", config, cwd)
-        clear_state(session_id)
-        log("session state cleared", config, cwd)
         return {
             "action": "pass",
             "reason": None,

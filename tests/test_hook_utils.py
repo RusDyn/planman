@@ -114,8 +114,8 @@ class TestRunEvaluation(unittest.TestCase):
         self.assertIn("needs 7", r2["reason"])
 
     @patch("hook_utils.evaluate_plan")
-    def test_max_rounds_blocks_and_clears_state(self, mock_eval):
-        """Exceeding max rounds → block + reason mentions 'human' + state cleared."""
+    def test_max_rounds_blocks(self, mock_eval):
+        """Exceeding max rounds → block + reason mentions 'human' + stays blocked."""
         from hook_utils import run_evaluation
         mock_eval.return_value = (LOW_SCORE_RESULT, None)
         config = _make_config(max_rounds=1)
@@ -127,6 +127,44 @@ class TestRunEvaluation(unittest.TestCase):
         self.assertEqual(r2["action"], "block")
         self.assertIn("Max evaluation rounds", r2["reason"])
         self.assertIn("Please review", r2["reason"])
+
+        # Round 3 (retry): should still be blocked at max_rounds
+        r3 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r3["action"], "block")
+        self.assertIn("Max evaluation rounds", r3["reason"])
+
+    @patch("hook_utils.evaluate_plan")
+    def test_round_continues_after_pass(self, mock_eval):
+        """After plan passes on round 2, round 3 is NOT reset to 1."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config()
+
+        r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r1["action"], "block")  # Round 1: mandatory
+
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "pass")   # Round 2: pass
+
+        r3 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r3["action"], "pass")   # Round 3: still passes (NOT first-round)
+        self.assertNotIn("First-round", r3.get("reason") or "")
+
+    @patch("hook_utils.evaluate_plan")
+    def test_pass_clears_feedback_not_state(self, mock_eval):
+        """Pass preserves round count but nulls last_feedback."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config()
+
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")  # R1
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")  # R2: pass
+
+        from state import load_state
+        state = load_state(self._session_id)
+        self.assertEqual(state["round_count"], 2)        # preserved
+        self.assertEqual(state["last_score"], 8)          # preserved
+        self.assertIsNone(state["last_feedback"])          # nulled (no approval pollution)
 
     def test_empty_plan_text_returns_skip(self):
         from hook_utils import run_evaluation
