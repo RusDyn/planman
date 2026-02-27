@@ -27,6 +27,7 @@ Run these commands and report the results:
    print(f'timeout:    {c.timeout}s')
    print(f'rubric:     {\"custom\" if c.rubric != __import__(\"config\").DEFAULT_RUBRIC else \"built-in\"}')
    print(f'stress_test: {c.stress_test}')
+   print(f'context:     {c.context or \"(none)\"}')
    "
    ```
 3. Check for active sessions: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/clear_state.py list`

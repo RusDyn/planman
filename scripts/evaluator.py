@@ -32,10 +32,15 @@ def reset_codex_cache():
     _codex_available = None
 
 
-def build_prompt(plan_text, rubric, previous_feedback=None, round_number=1):
+def build_prompt(plan_text, rubric, previous_feedback=None, round_number=1, context=None):
     """Build the evaluation prompt for codex exec."""
+    context_section = ""
+    if context:
+        context_section = f"## Project Context\n\n{context}\n\n"
+
     prompt = (
         "You are a senior software architect reviewing an implementation plan.\n\n"
+        f"{context_section}"
         "Evaluate the following implementation plan using the rubric.\n\n"
         f"{rubric}\n\n"
         "## Feedback Guidelines\n\n"
@@ -64,7 +69,11 @@ def evaluate_plan(plan_text, config, previous_feedback=None, round_number=1, cwd
     if not check_codex_installed(config.codex_path):
         return None, "codex CLI not found. Install: npm install -g @openai/codex"
 
-    prompt = build_prompt(plan_text, config.rubric, previous_feedback, round_number)
+    prompt = build_prompt(plan_text, config.rubric, previous_feedback, round_number, context=config.context)
+
+    if len(prompt) > 500_000:  # ~500k chars; safety margin before OS ARG_MAX (~2MB)
+        return None, "prompt too large (accumulated feedback). Consider lowering max_rounds."
+
     schema_path = os.path.join(PLUGIN_ROOT, "schemas", "evaluation.json")
 
     if not os.path.isfile(schema_path):

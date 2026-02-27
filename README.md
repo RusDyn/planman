@@ -82,6 +82,7 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 | `timeout` | `PLANMAN_TIMEOUT` | `90` | Seconds for codex subprocess (1-600; keep ≤ 90s, hook timeout is 120s) |
 | `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt (skips Codex on round 1) |
 | `stress_test_prompt` | `PLANMAN_STRESS_TEST_PROMPT` | *(built-in)* | Custom first-round rejection message |
+| `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context injected into evaluation prompt |
 
 When `stress_test` is enabled, `max_rounds` is automatically clamped to a minimum of 2.
 
@@ -150,7 +151,6 @@ Or in `.claude/planman.jsonc`:
 Session state is stored in the system temp directory (run `python3 -c "import tempfile; print(tempfile.gettempdir())"` to find it).
 - Tracks round count, last score, and previous feedback
 - Cleared when a plan passes evaluation or via `/planman:clear`
-- Sessions are considered stale after 30 minutes of inactivity
 - Safe to delete manually
 
 ## Plugin Structure

@@ -135,6 +135,8 @@ class TestRunEvaluation(unittest.TestCase):
         for text in ["", "   ", "\n\t  ", None]:
             result = run_evaluation(text, self._session_id, config)
             self.assertEqual(result["action"], "skip", f"Failed for: {text!r}")
+            self.assertIsNotNone(result["system_message"], f"Expected system_message for: {text!r}")
+            self.assertIn("empty", result["system_message"].lower())
 
     @patch("hook_utils.evaluate_plan")
     def test_codex_error_fail_open(self, mock_eval):
@@ -329,7 +331,7 @@ class TestPlanFileSizeLimit(unittest.TestCase):
     """Test that oversized plan files are rejected by _find_plan_file."""
 
     def test_oversized_plan_via_marker_returns_none(self):
-        """Plan file > 1MB referenced by marker → returns (None, None)."""
+        """Plan file > 1MB referenced by marker → returns (None, None, reason)."""
         import tempfile as _tmpmod
         from pre_exit_plan_hook import _find_plan_file, _safe_session_id, _MARKER_TEMPLATE
 
@@ -347,9 +349,11 @@ class TestPlanFileSizeLimit(unittest.TestCase):
             json.dump({"plan_file_path": oversized_path}, f)
 
         try:
-            plan_path, plan_text = _find_plan_file(session_id, None)
+            plan_path, plan_text, skip_reason = _find_plan_file(session_id, None)
             self.assertIsNone(plan_path)
             self.assertIsNone(plan_text)
+            self.assertIsNotNone(skip_reason)
+            self.assertIn("too large", skip_reason)
         finally:
             os.unlink(oversized_path)
             try:
@@ -374,9 +378,10 @@ class TestPlanFileSizeLimit(unittest.TestCase):
             json.dump({"plan_file_path": plan_file}, f)
 
         try:
-            plan_path, plan_text = _find_plan_file(session_id, None)
+            plan_path, plan_text, skip_reason = _find_plan_file(session_id, None)
             self.assertEqual(plan_path, plan_file)
             self.assertIn("Step one", plan_text)
+            self.assertIsNone(skip_reason)
         finally:
             os.unlink(plan_file)
             try:

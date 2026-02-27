@@ -10,8 +10,6 @@ import os
 import tempfile
 import time
 
-_STALE_TTL = 1800  # 30 minutes — reset round counter after inactivity
-
 
 def _state_path(session_id):
     """Return the state file path for a session."""

@@ -62,7 +62,9 @@ def _output_allow(system_message=None):
 def _find_plan_file(session_id, cwd):
     """Find the plan file path via session marker or fallback scan.
 
-    Returns (plan_file_path, plan_text) or (None, None).
+    Returns (plan_file_path, plan_text, skip_reason) where skip_reason
+    is a human-readable message when the plan was found but rejected
+    (e.g. oversized), or None on success / when no plan exists at all.
     """
     safe_id = _safe_session_id(session_id)
     marker_path = _MARKER_TEMPLATE.format(session_id=safe_id)
@@ -76,11 +78,11 @@ def _find_plan_file(session_id, cwd):
         plan_path = marker.get("plan_file_path", "")
         if plan_path and os.path.isfile(plan_path):
             if os.path.getsize(plan_path) > _MAX_PLAN_SIZE:
-                return None, None
+                return None, None, f"Plan file too large (>1 MB): {plan_path}"
             with open(plan_path, "r", encoding="utf-8") as f:
                 text = f.read()
             if text.strip():
-                return plan_path, text
+                return plan_path, text, None
     except (OSError, json.JSONDecodeError, KeyError):
         pass
 
@@ -93,15 +95,15 @@ def _find_plan_file(session_id, cwd):
                 latest = max(md_files, key=os.path.getmtime)
                 try:
                     if os.path.getsize(latest) > _MAX_PLAN_SIZE:
-                        return None, None
+                        return None, None, f"Plan file too large (>1 MB): {latest}"
                     with open(latest, "r", encoding="utf-8") as f:
                         text = f.read()
                     if text.strip():
-                        return latest, text
+                        return latest, text, None
                 except OSError:
                     pass
 
-    return None, None
+    return None, None, None
 
 
 def _main():
@@ -135,11 +137,16 @@ def _main():
     session_id = hook_input.get("session_id", "default")
 
     # Find the plan file
-    plan_path, plan_text = _find_plan_file(session_id, cwd)
+    plan_path, plan_text, skip_reason = _find_plan_file(session_id, cwd)
 
     if not plan_text:
-        log("no plan file found — allowing ExitPlanMode", config, cwd)
-        _output_allow()
+        if skip_reason:
+            log(f"plan skipped: {skip_reason}", config, cwd)
+            _output_allow(system_message=f"Planman: {skip_reason}")
+        else:
+            log("no plan file found — allowing ExitPlanMode", config, cwd)
+            _output_allow()
+    return
 
     log(f"evaluating plan from {plan_path}", config, cwd)
 

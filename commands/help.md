@@ -49,6 +49,7 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 | `timeout` | `PLANMAN_TIMEOUT` | `90` | Seconds for codex subprocess |
 | `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt |
 | `stress_test_prompt` | `PLANMAN_STRESS_TEST_PROMPT` | *(built-in)* | Custom first-round rejection message |
+| `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context for evaluator |
 
 ### Quick Start
 

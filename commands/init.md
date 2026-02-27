@@ -50,7 +50,9 @@ content = '''// Planman configuration
   // Auto-reject first plan for deep revision (skips Codex on round 1)
   \"stress_test\": false,
   // Custom first-round rejection message (empty = built-in)
-  \"stress_test_prompt\": \"\"
+  \"stress_test_prompt\": \"\",
+  // Project context for the evaluator (e.g. \"Python CLI tool, no web framework\")
+  \"context\": \"\"
 }
 '''
 

@@ -138,7 +138,7 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     """
     # Empty text — skip
     if not plan_text or not plan_text.strip():
-        return {"action": "skip", "reason": None, "system_message": None}
+        return {"action": "skip", "reason": None, "system_message": "Planman: Plan is empty — nothing to evaluate."}
 
     # Load state and update round counter
     state = load_state(session_id)

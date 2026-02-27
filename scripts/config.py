@@ -12,13 +12,13 @@ import re
 DEFAULT_RUBRIC = """\
 Score the plan on these 5 criteria (0-2 each, 10 max):
 
-1. **Completeness** (0-2): Does the plan address all stated requirements? Are there gaps?
+1. **Completeness** (0-2): Does the plan address all stated requirements? Are there gaps? Completeness includes a verification strategy (tests, manual checks, rollback plan).
 2. **Correctness** (0-2): Is the technical approach sound? Any flaws or misunderstandings?
 3. **Sequencing** (0-2): Are steps ordered logically? Are dependencies respected?
 4. **Risk Awareness** (0-2): Does the plan identify edge cases, failure modes, or risks?
 5. **Clarity** (0-2): Are steps specific and actionable? Could a developer follow them?
 
-The overall score should reflect the sum of the 5 breakdown scores.
+The overall score MUST equal the sum of the 5 breakdown scores.
 Be strict — a score of 7+ means the plan is ready to execute as-is.\
 """
 
@@ -40,6 +40,7 @@ DEFAULTS = {
     "timeout": 90,
     "stress_test": False,
     "stress_test_prompt": "",
+    "context": "",
 }
 
 _BOOL_TRUTHY = {"true", "1", "yes", "on"}
@@ -88,6 +89,7 @@ class Config:
         "timeout",
         "stress_test",
         "stress_test_prompt",
+        "context",
     )
 
     def __init__(self, **kwargs):
@@ -102,6 +104,7 @@ class Config:
         self.timeout = kwargs.get("timeout", DEFAULTS["timeout"])
         self.stress_test = kwargs.get("stress_test", DEFAULTS["stress_test"])
         self.stress_test_prompt = kwargs.get("stress_test_prompt", "") or DEFAULT_STRESS_TEST_PROMPT
+        self.context = kwargs.get("context", "")
 
 
 def _strip_jsonc_comments(text):
@@ -147,6 +150,7 @@ def _load_env_overrides():
         "PLANMAN_TIMEOUT": ("timeout", _coerce_int),
         "PLANMAN_STRESS_TEST": ("stress_test", _coerce_bool),
         "PLANMAN_STRESS_TEST_PROMPT": ("stress_test_prompt", str),
+        "PLANMAN_CONTEXT": ("context", str),
     }
     for env_var, (key, coerce) in env_map.items():
         val = os.environ.get(env_var)
@@ -204,4 +208,5 @@ def load_config(cwd=None):
         timeout=merged["timeout"],
         stress_test=merged["stress_test"],
         stress_test_prompt=merged.get("stress_test_prompt", ""),
+        context=merged.get("context", ""),
     )

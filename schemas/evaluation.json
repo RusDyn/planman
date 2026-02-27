@@ -47,17 +47,17 @@
     "weaknesses": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Specific issues that lower the score. Each should be actionable."
+      "description": "2-5 specific issues that lower the score. Reference step numbers."
     },
     "suggestions": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Concrete improvements the plan author should make."
+      "description": "2-5 concrete improvements. Reference step numbers."
     },
     "strengths": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "What the plan does well. Reinforces good practices."
+      "description": "1-3 things the plan does well."
     }
   },
   "required": ["score", "breakdown", "weaknesses", "suggestions", "strengths"],

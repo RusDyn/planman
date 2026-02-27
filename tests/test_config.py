@@ -317,6 +317,50 @@ class TestInvalidTypeCoercion(unittest.TestCase):
         self.assertEqual(cfg.threshold, DEFAULTS["threshold"])
 
 
+class TestContextConfig(unittest.TestCase):
+    def setUp(self):
+        self._saved = {}
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                self._saved[k] = os.environ.pop(k)
+        self._orig_dir = os.getcwd()
+        self._tmpdir = tempfile.mkdtemp()
+        os.chdir(self._tmpdir)
+
+    def tearDown(self):
+        os.chdir(self._orig_dir)
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                del os.environ[k]
+        os.environ.update(self._saved)
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_context_default_empty(self):
+        cfg = load_config()
+        self.assertEqual(cfg.context, "")
+
+    def test_context_env_override(self):
+        os.environ["PLANMAN_CONTEXT"] = "Python CLI tool, no web framework"
+        cfg = load_config()
+        self.assertEqual(cfg.context, "Python CLI tool, no web framework")
+
+    def test_context_file_config(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"context": "React frontend with TypeScript"}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.context, "React frontend with TypeScript")
+
+    def test_context_env_overrides_file(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"context": "from file"}, f)
+        os.environ["PLANMAN_CONTEXT"] = "from env"
+        cfg = load_config()
+        self.assertEqual(cfg.context, "from env")
+
+
 class TestStressTestConfig(unittest.TestCase):
     def setUp(self):
         self._saved = {}

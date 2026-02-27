@@ -29,6 +29,9 @@ def _make_config(**overrides):
         "codex_path": "codex",
         "verbose": False,
         "timeout": 90,
+        "stress_test": False,
+        "stress_test_prompt": "",
+        "context": "",
     }
     defaults.update(overrides)
     return Config(**defaults)
@@ -63,6 +66,23 @@ class TestBuildPrompt(unittest.TestCase):
         self.assertIn("Fix X", prompt)
         self.assertIn("Round 2", prompt)
         self.assertIn("Which feedback items were addressed", prompt)
+
+    def test_prompt_with_context(self):
+        prompt = build_prompt("My plan", "Score it.", context="Python CLI tool, no web framework")
+        self.assertIn("## Project Context", prompt)
+        self.assertIn("Python CLI tool, no web framework", prompt)
+        # Context should appear before the rubric
+        ctx_pos = prompt.index("Project Context")
+        rubric_pos = prompt.index("Score it.")
+        self.assertLess(ctx_pos, rubric_pos)
+
+    def test_prompt_without_context(self):
+        prompt = build_prompt("My plan", "Score it.")
+        self.assertNotIn("Project Context", prompt)
+
+    def test_prompt_empty_context_excluded(self):
+        prompt = build_prompt("My plan", "Score it.", context="")
+        self.assertNotIn("Project Context", prompt)
 
 
 class TestParseCodexOutput(unittest.TestCase):
@@ -203,6 +223,38 @@ class TestEvaluatePlan(unittest.TestCase):
         result, error = evaluate_plan("My plan", config)
         self.assertIsNone(result)
         self.assertIn("malformed output", error)
+
+
+class TestPromptLengthLimit(unittest.TestCase):
+    def setUp(self):
+        reset_codex_cache()
+
+    def tearDown(self):
+        reset_codex_cache()
+
+    @patch("evaluator.check_codex_installed", return_value=True)
+    def test_oversized_prompt_returns_error(self, mock_check):
+        """Prompt > 500KB → error without calling subprocess."""
+        config = _make_config()
+        huge_plan = "x" * 600_000
+        result, error = evaluate_plan(huge_plan, config)
+        self.assertIsNone(result)
+        self.assertIn("too large", error)
+        self.assertIn("max_rounds", error)
+
+    @patch("evaluator.subprocess.run")
+    @patch("evaluator.check_codex_installed", return_value=True)
+    def test_normal_prompt_proceeds(self, mock_check, mock_run):
+        """Prompt under 500KB → proceeds to subprocess."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(VALID_RESULT),
+            stderr="",
+        )
+        config = _make_config()
+        result, error = evaluate_plan("Normal plan", config)
+        self.assertIsNone(error)
+        mock_run.assert_called_once()
 
 
 class TestCheckCodexInstalled(unittest.TestCase):
