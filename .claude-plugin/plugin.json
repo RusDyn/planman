@@ -1,13 +1,10 @@
 {
   "name": "planman",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Evaluates Claude Code plans using OpenAI Codex CLI and rejects low-scoring plans with feedback",
   "author": { "name": "dyn" },
   "license": "MIT",
   "keywords": ["plan", "evaluation", "quality-gate", "codex"],
   "homepage": "https://github.com/RusDyn/planman",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/RusDyn/planman.git"
-  }
+  "repository": "https://github.com/RusDyn/planman"
 }
