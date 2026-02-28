@@ -10,6 +10,8 @@ import os
 import tempfile
 import time
 
+from path_utils import normalize_path as _normalize
+
 
 def _state_path(session_id):
     """Return the state file path for a session."""
@@ -88,7 +90,10 @@ def update_for_plan(state, plan_text, plan_path=None):
     """
     new_hash = compute_plan_hash(plan_text)
 
-    if plan_path and plan_path != state.get("plan_file_path"):
+    normalized_plan_path = _normalize(plan_path) if plan_path else None
+    stored_path = _normalize(state.get("plan_file_path")) if state.get("plan_file_path") else None
+
+    if normalized_plan_path and normalized_plan_path != stored_path:
         # New plan file (or first file) = new plan
         state["round_count"] = 1
     else:
@@ -97,8 +102,8 @@ def update_for_plan(state, plan_text, plan_path=None):
 
     state["plan_hash"] = new_hash
     state["last_eval_time"] = time.time()
-    if plan_path:
-        state["plan_file_path"] = plan_path
+    if normalized_plan_path:
+        state["plan_file_path"] = normalized_plan_path
     return state
 
 

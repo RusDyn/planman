@@ -35,11 +35,8 @@ DEFAULTS = {
     "fail_open": True,
     "enabled": True,
     "custom_rubric": "",
-    "codex_path": "codex",
     "verbose": False,
-    "timeout": 180,
     "stress_test": False,
-    "stress_test_prompt": "",
     "context": "",
     "source_verify": True,
 }
@@ -68,13 +65,6 @@ def _coerce_int(value, key):
         return DEFAULTS.get(key, 0)
 
 
-def _validate_codex_path(path):
-    """Reject paths containing '..' to prevent directory traversal."""
-    if ".." in path:
-        return DEFAULTS["codex_path"]
-    return path
-
-
 class Config:
     """Planman configuration."""
 
@@ -85,11 +75,8 @@ class Config:
         "fail_open",
         "enabled",
         "rubric",
-        "codex_path",
         "verbose",
-        "timeout",
         "stress_test",
-        "stress_test_prompt",
         "context",
         "source_verify",
     )
@@ -101,11 +88,8 @@ class Config:
         self.fail_open = kwargs.get("fail_open", DEFAULTS["fail_open"])
         self.enabled = kwargs.get("enabled", DEFAULTS["enabled"])
         self.rubric = kwargs.get("rubric", "") or DEFAULT_RUBRIC
-        self.codex_path = kwargs.get("codex_path", DEFAULTS["codex_path"])
         self.verbose = kwargs.get("verbose", DEFAULTS["verbose"])
-        self.timeout = kwargs.get("timeout", DEFAULTS["timeout"])
         self.stress_test = kwargs.get("stress_test", DEFAULTS["stress_test"])
-        self.stress_test_prompt = kwargs.get("stress_test_prompt", "") or DEFAULT_STRESS_TEST_PROMPT
         self.context = kwargs.get("context", "")
         self.source_verify = kwargs.get("source_verify", DEFAULTS["source_verify"])
 
@@ -148,11 +132,8 @@ def _load_env_overrides():
         "PLANMAN_FAIL_OPEN": ("fail_open", _coerce_bool),
         "PLANMAN_ENABLED": ("enabled", _coerce_bool),
         "PLANMAN_RUBRIC": ("custom_rubric", str),
-        "PLANMAN_CODEX_PATH": ("codex_path", str),
         "PLANMAN_VERBOSE": ("verbose", _coerce_bool),
-        "PLANMAN_TIMEOUT": ("timeout", _coerce_int),
         "PLANMAN_STRESS_TEST": ("stress_test", _coerce_bool),
-        "PLANMAN_STRESS_TEST_PROMPT": ("stress_test_prompt", str),
         "PLANMAN_CONTEXT": ("context", str),
         "PLANMAN_SOURCE_VERIFY": ("source_verify", _coerce_bool),
     }
@@ -187,10 +168,6 @@ def load_config(cwd=None):
     # Clamp numeric ranges (safe coercion — invalid strings fall back to defaults)
     merged["threshold"] = max(0, min(10, _coerce_int(merged["threshold"], "threshold")))
     merged["max_rounds"] = max(1, min(100, _coerce_int(merged["max_rounds"], "max_rounds")))
-    merged["timeout"] = max(1, min(600, _coerce_int(merged["timeout"], "timeout")))
-
-    # Validate codex_path
-    merged["codex_path"] = _validate_codex_path(merged["codex_path"])
 
     # Coerce stress_test to bool
     merged["stress_test"] = _coerce_bool(merged["stress_test"], "stress_test")
@@ -207,11 +184,8 @@ def load_config(cwd=None):
         fail_open=merged["fail_open"],
         enabled=merged["enabled"],
         rubric=merged.get("custom_rubric", ""),
-        codex_path=merged["codex_path"],
         verbose=merged["verbose"],
-        timeout=merged["timeout"],
         stress_test=merged["stress_test"],
-        stress_test_prompt=merged.get("stress_test_prompt", ""),
         context=merged.get("context", ""),
         source_verify=_coerce_bool(merged.get("source_verify", True), "source_verify"),
     )

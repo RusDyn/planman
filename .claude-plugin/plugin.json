@@ -1,6 +1,6 @@
 {
   "name": "planman",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Evaluates Claude Code plans using OpenAI Codex CLI and rejects low-scoring plans with feedback",
   "author": { "name": "dyn" },
   "license": "MIT",

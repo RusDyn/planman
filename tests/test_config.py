@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from config import Config, DEFAULT_RUBRIC, DEFAULT_STRESS_TEST_PROMPT, DEFAULTS, load_config, _coerce_bool, _coerce_int, _validate_codex_path, _strip_jsonc_comments
+from config import Config, DEFAULT_RUBRIC, DEFAULT_STRESS_TEST_PROMPT, DEFAULTS, load_config, _coerce_bool, _coerce_int, _strip_jsonc_comments
 
 
 class TestCoerceBool(unittest.TestCase):
@@ -57,9 +57,7 @@ class TestConfigDefaults(unittest.TestCase):
             self.assertTrue(cfg.fail_open)
             self.assertTrue(cfg.enabled)
             self.assertEqual(cfg.rubric, DEFAULT_RUBRIC)
-            self.assertEqual(cfg.codex_path, "codex")
             self.assertFalse(cfg.verbose)
-            self.assertEqual(cfg.timeout, 180)
         finally:
             os.environ.update(saved)
 
@@ -96,11 +94,6 @@ class TestEnvOverrides(unittest.TestCase):
         os.environ["PLANMAN_MODEL"] = "gpt-4o"
         cfg = load_config()
         self.assertEqual(cfg.model, "gpt-4o")
-
-    def test_codex_path_override(self):
-        os.environ["PLANMAN_CODEX_PATH"] = "/usr/local/bin/codex"
-        cfg = load_config()
-        self.assertEqual(cfg.codex_path, "/usr/local/bin/codex")
 
     def test_verbose_true(self):
         os.environ["PLANMAN_VERBOSE"] = "1"
@@ -188,17 +181,6 @@ class TestFileConfig(unittest.TestCase):
         self.assertEqual(cfg.threshold, 9)
 
 
-class TestValidateCodexPath(unittest.TestCase):
-    def test_codex_path_rejects_traversal(self):
-        self.assertEqual(_validate_codex_path("../evil/codex"), "codex")
-
-    def test_codex_path_allows_absolute(self):
-        self.assertEqual(_validate_codex_path("/usr/local/bin/codex"), "/usr/local/bin/codex")
-
-    def test_codex_path_allows_basename(self):
-        self.assertEqual(_validate_codex_path("codex"), "codex")
-
-
 class TestRangeClamping(unittest.TestCase):
     def setUp(self):
         self._saved = {}
@@ -221,16 +203,6 @@ class TestRangeClamping(unittest.TestCase):
         os.environ["PLANMAN_THRESHOLD"] = "999"
         cfg = load_config()
         self.assertEqual(cfg.threshold, 10)
-
-    def test_timeout_clamped_low(self):
-        os.environ["PLANMAN_TIMEOUT"] = "0"
-        cfg = load_config()
-        self.assertEqual(cfg.timeout, 1)
-
-    def test_timeout_clamped_high(self):
-        os.environ["PLANMAN_TIMEOUT"] = "9999"
-        cfg = load_config()
-        self.assertEqual(cfg.timeout, 600)
 
 
 class TestCoerceBoolKey(unittest.TestCase):
@@ -300,13 +272,6 @@ class TestInvalidTypeCoercion(unittest.TestCase):
             json.dump({"max_rounds": "abc"}, f)
         cfg = load_config()
         self.assertEqual(cfg.max_rounds, DEFAULTS["max_rounds"])
-
-    def test_timeout_invalid_string_uses_default(self):
-        os.makedirs(".claude", exist_ok=True)
-        with open(".claude/planman.jsonc", "w") as f:
-            json.dump({"timeout": "slow"}, f)
-        cfg = load_config()
-        self.assertEqual(cfg.timeout, DEFAULTS["timeout"])
 
     def test_threshold_float_string_uses_default(self):
         os.makedirs(".claude", exist_ok=True)
@@ -389,29 +354,12 @@ class TestStressTestConfig(unittest.TestCase):
         cfg = load_config()
         self.assertTrue(cfg.stress_test)
 
-    def test_stress_test_prompt_default(self):
-        cfg = load_config()
-        self.assertEqual(cfg.stress_test_prompt, DEFAULT_STRESS_TEST_PROMPT)
-        self.assertIn("6/10", cfg.stress_test_prompt)
-        self.assertIn("10/10", cfg.stress_test_prompt)
-
-    def test_stress_test_prompt_env_override(self):
-        os.environ["PLANMAN_STRESS_TEST_PROMPT"] = "Custom rejection message"
-        cfg = load_config()
-        self.assertEqual(cfg.stress_test_prompt, "Custom rejection message")
-
-    def test_stress_test_prompt_empty_fallback(self):
-        os.environ["PLANMAN_STRESS_TEST_PROMPT"] = ""
-        cfg = load_config()
-        self.assertEqual(cfg.stress_test_prompt, DEFAULT_STRESS_TEST_PROMPT)
-
     def test_stress_test_file_config(self):
         os.makedirs(".claude", exist_ok=True)
         with open(".claude/planman.jsonc", "w") as f:
-            json.dump({"stress_test": True, "stress_test_prompt": "File prompt"}, f)
+            json.dump({"stress_test": True}, f)
         cfg = load_config()
         self.assertTrue(cfg.stress_test)
-        self.assertEqual(cfg.stress_test_prompt, "File prompt")
 
     def test_stress_test_clamps_max_rounds(self):
         os.environ["PLANMAN_STRESS_TEST"] = "true"

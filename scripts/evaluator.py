@@ -14,15 +14,17 @@ PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT", "") or os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
 )
 
+_CODEX_BIN = "codex"
+
 _codex_available = None  # cached result
 
 
-def check_codex_installed(codex_path="codex"):
+def check_codex_installed(codex_path=None):
     """Check if codex CLI is installed. Result is cached."""
     global _codex_available
     if _codex_available is not None:
         return _codex_available
-    _codex_available = shutil.which(codex_path) is not None
+    _codex_available = shutil.which(codex_path or _CODEX_BIN) is not None
     return _codex_available
 
 
@@ -78,7 +80,7 @@ def evaluate_plan(plan_text, config, previous_feedback=None, round_number=1, cwd
     Returns (result_dict, error_string). On success error_string is None.
     On failure result_dict is None and error_string describes the problem.
     """
-    if not check_codex_installed(config.codex_path):
+    if not check_codex_installed():
         return None, "codex CLI not found. Install: npm install -g @openai/codex"
 
     prompt = build_prompt(
@@ -91,11 +93,7 @@ def evaluate_plan(plan_text, config, previous_feedback=None, round_number=1, cwd
     if len(prompt) > _MAX_PROMPT_SIZE:
         return None, f"prompt too large ({len(prompt) // 1024}KB > 2MB). Reduce max_rounds or plan size."
 
-    # Cap below hook timeout (300s hook − 30s margin = 270s max)
-    _HOOK_BUDGET = 270
-    effective_timeout = min(config.timeout, _HOOK_BUDGET)
-    if len(prompt) > 500_000:
-        effective_timeout = min(int(config.timeout * 1.5), _HOOK_BUDGET)
+    effective_timeout = 570  # 600s hook timeout − 30s margin
 
     schema_path = os.path.join(PLUGIN_ROOT, "schemas", "evaluation.json")
 
@@ -103,7 +101,7 @@ def evaluate_plan(plan_text, config, previous_feedback=None, round_number=1, cwd
         return None, f"schema file not found: {schema_path}. Check CLAUDE_PLUGIN_ROOT."
 
     cmd = [
-        config.codex_path,
+        _CODEX_BIN,
         "exec", "-",                          # Read prompt from stdin
         "--output-schema", schema_path,
         "--sandbox", "read-only",
@@ -123,10 +121,10 @@ def evaluate_plan(plan_text, config, previous_feedback=None, round_number=1, cwd
             cwd=cwd or os.getcwd(),
         )
     except subprocess.TimeoutExpired:
-        return None, f"codex timed out ({effective_timeout}s). Increase: PLANMAN_TIMEOUT={config.timeout + 30}"
+        return None, f"codex timed out ({effective_timeout}s). Try a shorter plan or check codex CLI health."
     except FileNotFoundError:
         reset_codex_cache()
-        return None, f"codex not found at '{config.codex_path}'. Install: npm install -g @openai/codex, or set PLANMAN_CODEX_PATH"
+        return None, "codex not found. Install: npm install -g @openai/codex"
     except OSError as e:
         return None, f"failed to run codex: {e}"
 

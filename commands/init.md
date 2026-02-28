@@ -41,18 +41,12 @@ content = '''// Planman configuration
   \"enabled\": true,
   // Custom evaluation rubric (empty = built-in)
   \"custom_rubric\": \"\",
-  // Path to codex binary
-  \"codex_path\": \"codex\",
   // Debug output to stderr + log file
   \"verbose\": false,
-  // Seconds for codex subprocess (1-600)
-  \"timeout\": 180,
   // Codex verifies plan against actual source files
   \"source_verify\": true,
   // Auto-reject first plan for deep revision (skips Codex on round 1)
   \"stress_test\": false,
-  // Custom first-round rejection message (empty = built-in)
-  \"stress_test_prompt\": \"\",
   // Project context for the evaluator (e.g. \"Python CLI tool, no web framework\")
   \"context\": \"\"
 }

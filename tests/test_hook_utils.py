@@ -50,11 +50,8 @@ def _make_config(**overrides):
         "fail_open": True,
         "enabled": True,
         "rubric": "Score it 1-10.",
-        "codex_path": "codex",
         "verbose": False,
-        "timeout": 180,
         "stress_test": False,
-        "stress_test_prompt": "Stress-test default prompt",
         "source_verify": True,
     }
     defaults.update(overrides)
@@ -268,16 +265,6 @@ class TestStressTestEvaluation(unittest.TestCase):
         mock_eval.assert_not_called()
 
     @patch("hook_utils.evaluate_plan")
-    def test_stress_test_uses_custom_prompt(self, mock_eval):
-        """Rejection reason matches config.stress_test_prompt."""
-        from hook_utils import run_evaluation
-        config = _make_config(stress_test=True, stress_test_prompt="Make it better!")
-
-        result = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
-        self.assertEqual(result["reason"], "Make it better!")
-        self.assertIn("Stress-test mode", result["system_message"])
-
-    @patch("hook_utils.evaluate_plan")
     def test_stress_test_round_two_uses_codex(self, mock_eval):
         """stress_test=true, round 2 → Codex is called normally."""
         from hook_utils import run_evaluation
@@ -292,16 +279,6 @@ class TestStressTestEvaluation(unittest.TestCase):
         # Round 2: Codex evaluates
         r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
         mock_eval.assert_called_once()
-
-    @patch("hook_utils.evaluate_plan")
-    def test_stress_test_custom_prompt_in_rejection(self, mock_eval):
-        """Override prompt appears in the rejection."""
-        from hook_utils import run_evaluation
-        custom = "Deep dive: find all edge cases and fix them."
-        config = _make_config(stress_test=True, stress_test_prompt=custom)
-
-        result = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
-        self.assertEqual(result["reason"], custom)
 
     @patch("hook_utils.evaluate_plan")
     def test_no_stress_test_uses_codex_round_one(self, mock_eval):
@@ -371,31 +348,35 @@ class TestPlanFileSizeLimit(unittest.TestCase):
     """Test that oversized plan files are rejected by _find_plan_file."""
 
     def test_oversized_plan_via_marker_returns_none(self):
-        """Plan file > 1MB referenced by marker → returns (None, None, reason)."""
+        """Plan file > 1MB referenced by marker → returns (None, None, None)."""
         import tempfile as _tmpmod
+        import time
         from pre_exit_plan_hook import _find_plan_file
         from hook_utils import safe_session_id, MARKER_TEMPLATE
 
         session_id = f"test-size-{os.getpid()}"
         safe_id = safe_session_id(session_id)
+        config = _make_config()
+        os.environ["_PLANMAN_DEBUG_MARKER_ONLY"] = "1"
 
         # Create an oversized plan file
         with _tmpmod.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
             f.write("# Plan\n" + "x" * 1_100_000)
             oversized_path = f.name
 
-        # Create marker pointing to it
+        # Create marker pointing to it (with timestamp)
         marker_path = MARKER_TEMPLATE.format(session_id=safe_id)
         with open(marker_path, "w") as f:
-            json.dump({"plan_file_path": oversized_path}, f)
+            json.dump({"plan_file_path": oversized_path, "timestamp": time.time()}, f)
 
         try:
-            plan_path, plan_text, skip_reason = _find_plan_file(session_id, None)
+            plan_path, plan_text, skip_reason = _find_plan_file(session_id, None, config)
             self.assertIsNone(plan_path)
             self.assertIsNone(plan_text)
             self.assertIsNotNone(skip_reason)
             self.assertIn("too large", skip_reason)
         finally:
+            os.environ.pop("_PLANMAN_DEBUG_MARKER_ONLY", None)
             os.unlink(oversized_path)
             try:
                 os.unlink(marker_path)
@@ -405,11 +386,13 @@ class TestPlanFileSizeLimit(unittest.TestCase):
     def test_normal_size_plan_accepted(self):
         """Plan file under 1MB → returns content."""
         import tempfile as _tmpmod
+        import time
         from pre_exit_plan_hook import _find_plan_file
         from hook_utils import safe_session_id, MARKER_TEMPLATE
 
         session_id = f"test-size-ok-{os.getpid()}"
         safe_id = safe_session_id(session_id)
+        config = _make_config()
 
         with _tmpmod.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
             f.write("# Plan\n1. Step one\n2. Step two")
@@ -417,11 +400,11 @@ class TestPlanFileSizeLimit(unittest.TestCase):
 
         marker_path = MARKER_TEMPLATE.format(session_id=safe_id)
         with open(marker_path, "w") as f:
-            json.dump({"plan_file_path": plan_file}, f)
+            json.dump({"plan_file_path": plan_file, "timestamp": time.time()}, f)
 
         try:
-            plan_path, plan_text, skip_reason = _find_plan_file(session_id, None)
-            self.assertEqual(plan_path, plan_file)
+            plan_path, plan_text, skip_reason = _find_plan_file(session_id, None, config)
+            self.assertIsNotNone(plan_path)
             self.assertIn("Step one", plan_text)
             self.assertIsNone(skip_reason)
         finally:
@@ -504,6 +487,69 @@ class TestLogAlwaysToFile(unittest.TestCase):
         with open(log_path) as f:
             content = f.read()
         self.assertIn("test non-verbose log entry", content)
+
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestLogConfigNone(unittest.TestCase):
+    """Test that log(config=None) does not throw."""
+
+    def test_log_with_none_config(self):
+        from hook_utils import log
+        import tempfile as _tmpmod
+
+        tmpdir = _tmpmod.mkdtemp()
+        claude_dir = os.path.join(tmpdir, ".claude")
+        os.makedirs(claude_dir, exist_ok=True)
+
+        # Should not raise
+        log("test message with None config", config=None, cwd=tmpdir)
+
+        log_path = os.path.join(claude_dir, "planman.log")
+        self.assertTrue(os.path.exists(log_path))
+        with open(log_path) as f:
+            content = f.read()
+        self.assertIn("test message with None config", content)
+
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestNormalizePath(unittest.TestCase):
+    """Test normalize_path from path_utils."""
+
+    def test_tilde_expansion(self):
+        from path_utils import normalize_path
+        result = normalize_path("~/some/path")
+        self.assertNotIn("~", result)
+        self.assertTrue(os.path.isabs(result))
+
+    def test_none_passthrough(self):
+        from path_utils import normalize_path
+        self.assertIsNone(normalize_path(None))
+
+    def test_empty_string_passthrough(self):
+        from path_utils import normalize_path
+        self.assertEqual(normalize_path(""), "")
+
+    def test_absolute_path_unchanged(self):
+        from path_utils import normalize_path
+        result = normalize_path("/usr/local/bin")
+        self.assertEqual(result, os.path.realpath("/usr/local/bin"))
+
+    def test_symlink_resolution(self):
+        from path_utils import normalize_path
+        import tempfile as _tmpmod
+
+        tmpdir = _tmpmod.mkdtemp()
+        real_file = os.path.join(tmpdir, "real.txt")
+        link_file = os.path.join(tmpdir, "link.txt")
+        with open(real_file, "w") as f:
+            f.write("test")
+        os.symlink(real_file, link_file)
+
+        self.assertEqual(normalize_path(link_file), normalize_path(real_file))
 
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)

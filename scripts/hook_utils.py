@@ -18,7 +18,7 @@ try:
 except ImportError:
     fcntl = None
 
-from config import load_config
+from config import DEFAULT_STRESS_TEST_PROMPT, load_config
 from evaluator import check_codex_installed, evaluate_plan
 from state import (
     compute_plan_hash,
@@ -64,7 +64,7 @@ def _log_to_file(msg, cwd):
 def log(msg, config, cwd=None):
     """Always log to file; also print to stderr if verbose."""
     _log_to_file(msg, cwd)
-    if config.verbose:
+    if config and config.verbose:
         print(f"[planman] {msg}", file=sys.stderr)
 
 
@@ -171,9 +171,9 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
             ),
         }
 
-    # Stress-test mode: skip Codex on round 1, reject with custom prompt
+    # Stress-test mode: skip Codex on round 1, reject with built-in prompt
     if config.stress_test and state["round_count"] == 1:
-        state = record_feedback(state, None, config.stress_test_prompt, None)
+        state = record_feedback(state, None, DEFAULT_STRESS_TEST_PROMPT, None)
         try:
             save_state(state)
         except (OSError, ValueError) as e:
@@ -181,7 +181,7 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
         log("stress-test mode: first plan rejected without evaluation", config, cwd)
         return {
             "action": "block",
-            "reason": config.stress_test_prompt,
+            "reason": DEFAULT_STRESS_TEST_PROMPT,
             "system_message": (
                 f"Planman: Stress-test mode — first plan rejected for deep revision. "
                 f"Round 1/{config.max_rounds}."

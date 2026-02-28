@@ -28,6 +28,7 @@ if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 
 from hook_utils import MARKER_TEMPLATE, safe_session_id
+from path_utils import normalize_path
 
 
 def _main():
@@ -67,7 +68,7 @@ def _main():
     marker_path = MARKER_TEMPLATE.format(session_id=session_id)
 
     try:
-        marker = {"plan_file_path": file_path, "timestamp": time.time()}
+        marker = {"plan_file_path": normalize_path(file_path), "timestamp": time.time()}
         tmp_fd, tmp_path = tempfile.mkstemp(
             dir=os.path.dirname(marker_path), prefix="planman-marker-tmp-"
         )

@@ -44,12 +44,9 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 | `fail_open` | `PLANMAN_FAIL_OPEN` | `true` | Pass if Codex fails |
 | `enabled` | `PLANMAN_ENABLED` | `true` | Master switch |
 | `custom_rubric` | `PLANMAN_RUBRIC` | *(built-in)* | Custom evaluation rubric |
-| `codex_path` | `PLANMAN_CODEX_PATH` | `codex` | Path to codex binary |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
-| `timeout` | `PLANMAN_TIMEOUT` | `180` | Seconds for codex subprocess |
 | `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Codex verifies plan against actual source files |
 | `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt |
-| `stress_test_prompt` | `PLANMAN_STRESS_TEST_PROMPT` | *(built-in)* | Custom first-round rejection message |
 | `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context for evaluator |
 
 ### Quick Start
@@ -74,7 +71,6 @@ When `stress_test` is enabled, `max_rounds` is automatically clamped to a minimu
 - Set `PLANMAN_THRESHOLD=10` to always reject (testing)
 - Set `PLANMAN_THRESHOLD=1` to always pass (testing)
 - Set `PLANMAN_MAX_ROUNDS=1` to get just one round of feedback
-- Set `PLANMAN_CODEX_PATH=/nonexistent` to test fail-open behavior
 - Set `PLANMAN_VERBOSE=true` to see detailed debug output
 
 ## Commands

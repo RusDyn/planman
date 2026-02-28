@@ -26,11 +26,8 @@ def _make_config(**overrides):
         "fail_open": True,
         "enabled": True,
         "rubric": "Score it 1-10.",
-        "codex_path": "codex",
         "verbose": False,
-        "timeout": 180,
         "stress_test": False,
-        "stress_test_prompt": "",
         "context": "",
         "source_verify": True,
     }
@@ -290,7 +287,7 @@ class TestEvaluatePlan(unittest.TestCase):
         result, error = evaluate_plan("My plan", config)
         self.assertIsNone(result)
         self.assertIn("timed out", error)
-        self.assertIn("PLANMAN_TIMEOUT", error)
+        self.assertIn("Try a shorter plan", error)
 
     @patch("evaluator.subprocess.run")
     @patch("evaluator.check_codex_installed", return_value=True)
@@ -338,20 +335,20 @@ class TestPromptLengthLimit(unittest.TestCase):
 
     @patch("evaluator.subprocess.run")
     @patch("evaluator.check_codex_installed", return_value=True)
-    def test_large_prompt_gets_scaled_timeout(self, mock_check, mock_run):
+    def test_large_prompt_uses_hook_budget(self, mock_check, mock_run):
         """Prompt > 500KB but < 2MB → proceeds with scaled timeout."""
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=json.dumps(VALID_RESULT),
             stderr="",
         )
-        config = _make_config(timeout=180)
+        config = _make_config()
         large_plan = "x" * 600_000
         result, error = evaluate_plan(large_plan, config)
         self.assertIsNone(error)
-        # Verify timeout was scaled: min(180 * 1.5, 270) = 270 (capped at _HOOK_BUDGET)
+        # Verify timeout is capped at hook budget (600s hook − 30s margin)
         call_kwargs = mock_run.call_args[1]
-        self.assertEqual(call_kwargs["timeout"], 270)
+        self.assertEqual(call_kwargs["timeout"], 570)
 
     @patch("evaluator.subprocess.run")
     @patch("evaluator.check_codex_installed", return_value=True)

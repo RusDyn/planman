@@ -109,12 +109,9 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 | `fail_open` | `PLANMAN_FAIL_OPEN` | `true` | Pass through if Codex fails |
 | `enabled` | `PLANMAN_ENABLED` | `true` | Master switch |
 | `custom_rubric` | `PLANMAN_RUBRIC` | *(built-in)* | Custom evaluation rubric |
-| `codex_path` | `PLANMAN_CODEX_PATH` | `codex` | Path to codex binary (rejects `..` paths) |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
-| `timeout` | `PLANMAN_TIMEOUT` | `180` | Seconds for codex subprocess (1-600; scaled up for large prompts, capped at 270s to stay within hook timeout) |
 | `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Codex verifies plan against actual source files |
 | `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt (skips Codex on round 1) |
-| `stress_test_prompt` | `PLANMAN_STRESS_TEST_PROMPT` | *(built-in)* | Custom first-round rejection message |
 | `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context injected into evaluation prompt |
 
 When `stress_test` is enabled, `max_rounds` is automatically clamped to a minimum of 2.

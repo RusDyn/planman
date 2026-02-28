@@ -4,7 +4,7 @@
   // Minimum score (0-10) to pass
   "threshold": 7,
   // Evaluation rounds before you decide (1-100)
-  "max_rounds": 3,
+  "max_rounds": 5,
   // Override Codex model (empty = codex default)
   "model": "",
   // Pass through if Codex fails
@@ -13,16 +13,10 @@
   "enabled": true,
   // Custom evaluation rubric (empty = built-in)
   "custom_rubric": "",
-  // Path to codex binary
-  "codex_path": "codex",
   // Debug output to stderr + log file
   "verbose": true,
-  // Seconds for codex subprocess (1-600)
-  "timeout": 180,
   // Auto-reject first plan for deep revision (skips Codex on round 1)
   "stress_test": true,
-  // Custom first-round rejection message (empty = built-in)
-  "stress_test_prompt": "",
   // Project context for the evaluator (e.g. "Python CLI, no web framework")
   "context": ""
 }

@@ -218,5 +218,23 @@ class TestStatePath(unittest.TestCase):
         self.assertIn("planman-default", path)
 
 
+class TestPathNormalization(unittest.TestCase):
+    """Test that tilde and absolute paths are treated as the same file."""
+
+    def test_tilde_vs_absolute_same_file(self):
+        """~/plans/x.md and /home/user/plans/x.md → round increments, not reset."""
+        home = os.path.expanduser("~")
+        tilde_path = "~/plans/x.md"
+        absolute_path = os.path.join(home, "plans", "x.md")
+
+        state = {"session_id": "test", "round_count": 0, "plan_hash": None}
+        state = update_for_plan(state, "My plan v1", plan_path=tilde_path)
+        self.assertEqual(state["round_count"], 1)
+
+        # Same file referenced with absolute path → should increment, not reset
+        state = update_for_plan(state, "My plan v2", plan_path=absolute_path)
+        self.assertEqual(state["round_count"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
