@@ -11,3 +11,6 @@ build/
 .claude/planman.log
 .claude/plans/
 .claude/settings.local.json
+
+# Playwright MCP auto-generated logs
+.playwright-mcp/
