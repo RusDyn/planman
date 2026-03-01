@@ -68,8 +68,24 @@ def log(msg, config, cwd=None):
         print(f"[planman] {msg}", file=sys.stderr)
 
 
-def format_feedback(data, threshold, round_num, max_rounds, first_round=False):
-    """Format evaluation result into human-readable feedback."""
+def format_trend(history, current_score):
+    """Format score trend from history + current score.
+
+    Called BEFORE record_feedback() persists current_score to history,
+    so history contains only previous rounds' data.
+    """
+    if not history:
+        return ""
+    prev_score = history[-1].get("score")
+    if prev_score is None or current_score is None:
+        return ""
+    delta = current_score - prev_score
+    sign = "+" if delta > 0 else ""
+    return f"- **Previous**: {prev_score}/10 → {current_score}/10 ({sign}{delta})"
+
+
+def _format_feedback_legacy(data, threshold, round_num, max_rounds, first_round=False):
+    """Legacy feedback format (flat markdown). Activated via PLANMAN_LEGACY_FEEDBACK env var."""
     score = data.get("score", "?")
     breakdown = data.get("breakdown") or {}
     weaknesses = data.get("weaknesses") or []
@@ -99,7 +115,7 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False):
 
     if strengths:
         lines.append("")
-        lines.append("**Strengths:**")
+        lines.append("**Issues:**")
         for s in strengths:
             lines.append(f"- {s}")
 
@@ -122,6 +138,142 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False):
         lines.append("Revise your plan addressing these issues.")
 
     return "\n".join(lines)
+
+
+def format_feedback(data, threshold, round_num, max_rounds, first_round=False, trend=""):
+    """Format evaluation result into structured, actionable feedback.
+
+    Args:
+        data: Evaluation result dict with score, breakdown, weaknesses, etc.
+        threshold: Minimum score to pass.
+        round_num: Current round number.
+        max_rounds: Maximum evaluation rounds.
+        first_round: Whether this is the first round (mandatory rejection).
+        trend: Trend line string from format_trend() (empty on round 1).
+    """
+    if os.environ.get("PLANMAN_LEGACY_FEEDBACK"):
+        return _format_feedback_legacy(data, threshold, round_num, max_rounds, first_round)
+
+    score = data.get("score", "?")
+    breakdown = data.get("breakdown") or {}
+    weaknesses = data.get("weaknesses") or []
+    suggestions = data.get("suggestions") or []
+    strengths = data.get("strengths") or []
+
+    # Header
+    lines = ["## Evaluation Result"]
+    if first_round:
+        lines.append(
+            f"- **Score**: {score}/10 (threshold: {threshold}) | "
+            f"**First-round review** — Round 1/{max_rounds}"
+        )
+    else:
+        lines.append(
+            f"- **Score**: {score}/10 (threshold: {threshold}) | "
+            f"Round {round_num}/{max_rounds}"
+        )
+    if trend:
+        lines.append(trend)
+
+    # Breakdown sorted by lowest scores first
+    lines.append("")
+    lines.append("## Breakdown (lowest scores first)")
+    lines.append("| Criterion | Score |")
+    lines.append("|-----------|-------|")
+    sorted_breakdown = sorted(breakdown.items(), key=lambda x: x[1])
+    for criterion, value in sorted_breakdown:
+        lines.append(f"| {criterion} | {value}/2 |")
+    # Show missing criteria as ?
+    all_criteria = ["completeness", "correctness", "sequencing", "risk_awareness", "clarity"]
+    for c in all_criteria:
+        if c not in breakdown:
+            lines.append(f"| {c} | ?/2 |")
+
+    # Strengths — kept in reason to prevent regression
+    if strengths:
+        lines.append("")
+        lines.append("## Strengths (preserve these)")
+        for s in strengths:
+            lines.append(f"- {s}")
+
+    # Issues — must fix
+    if weaknesses:
+        lines.append("")
+        lines.append("## Issues (must fix)")
+        for w in weaknesses:
+            lines.append(f"- {w}")
+
+    # Suggestions — improvements
+    if suggestions:
+        lines.append("")
+        lines.append("## Suggestions (improvements)")
+        for s in suggestions:
+            lines.append(f"- {s}")
+
+    # Call to action
+    lines.append("")
+    lines.append("## What To Do")
+    if first_round:
+        lines.append("Revise the plan addressing the issues above. Preserve the strengths. Then call ExitPlanMode.")
+    else:
+        lines.append("Revise the plan addressing the issues above. Preserve the strengths. Then call ExitPlanMode.")
+
+    return "\n".join(lines)
+
+
+def truncate_for_system_message(score, round_num, max_rounds, trend,
+                                 issues, suggestions, strengths, limit=2000):
+    """Build systemMessage with deterministic truncation under char limit.
+
+    Builds message by appending tiers. After each tier, checks length.
+    If over limit, stops adding and returns what fits.
+
+    Tier 1 (always included): Score + round + trend
+    Tier 2: Issues (first 3)
+    Tier 3: Strengths (first 3)
+    Tier 4: Suggestions (first 3)
+    """
+    # Tier 1 — always included, never truncated
+    parts = [f"Planman: {score}/10 | Round {round_num}/{max_rounds}"]
+    if trend:
+        parts.append(trend)
+    tier1 = "\n".join(parts)
+
+    # Tier 2 — issues
+    tier2_lines = []
+    if issues:
+        tier2_lines.append("\nIssues:")
+        for item in issues[:3]:
+            tier2_lines.append(f"- {item}")
+    tier2 = "\n".join(tier2_lines)
+
+    # Tier 3 — strengths
+    tier3_lines = []
+    if strengths:
+        tier3_lines.append("\nStrengths:")
+        for item in strengths[:3]:
+            tier3_lines.append(f"- {item}")
+    tier3 = "\n".join(tier3_lines)
+
+    # Tier 4 — suggestions
+    tier4_lines = []
+    if suggestions:
+        tier4_lines.append("\nSuggestions:")
+        for item in suggestions[:3]:
+            tier4_lines.append(f"- {item}")
+    tier4 = "\n".join(tier4_lines)
+
+    # Build by appending tiers — stop at first tier that doesn't fit
+    result = tier1
+    for tier in [tier2, tier3, tier4]:
+        if not tier:
+            continue
+        if len(result + tier) <= limit:
+            result += tier
+        else:
+            break  # Stop adding — later tiers won't fit either
+
+    return result
 
 
 def format_approval(data):
@@ -210,11 +362,22 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
             }
 
     assessment_score = result["score"]
+    weaknesses = result.get("weaknesses") or []
+    suggestions = result.get("suggestions") or []
+    strengths = result.get("strengths") or []
+
+    # Compute trend BEFORE recording feedback (history has prev rounds only)
+    trend = format_trend(state.get("history", []), assessment_score)
 
     # First-round mandatory rejection
     if state["round_count"] == 1:
         feedback_text = format_feedback(
-            result, config.threshold, state["round_count"], config.max_rounds, first_round=True
+            result, config.threshold, state["round_count"], config.max_rounds,
+            first_round=True, trend=trend,
+        )
+        sys_msg = truncate_for_system_message(
+            assessment_score, state["round_count"], config.max_rounds,
+            trend, weaknesses, suggestions, strengths,
         )
         state = record_feedback(state, assessment_score, feedback_text, result.get("breakdown"))
         try:
@@ -225,10 +388,7 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
         return {
             "action": "block",
             "reason": feedback_text,
-            "system_message": (
-                f"Planman: First-round review ({assessment_score}/10). "
-                f"Revision required. Round 1/{config.max_rounds}."
-            ),
+            "system_message": sys_msg,
         }
 
     if assessment_score >= config.threshold:
@@ -247,7 +407,12 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     else:
         # Plan rejected
         feedback_text = format_feedback(
-            result, config.threshold, state["round_count"], config.max_rounds
+            result, config.threshold, state["round_count"], config.max_rounds,
+            trend=trend,
+        )
+        sys_msg = truncate_for_system_message(
+            assessment_score, state["round_count"], config.max_rounds,
+            trend, weaknesses, suggestions, strengths,
         )
         state = record_feedback(state, assessment_score, feedback_text, result.get("breakdown"))
         try:
@@ -259,8 +424,5 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
         return {
             "action": "block",
             "reason": feedback_text,
-            "system_message": (
-                f"Planman: Plan rejected ({assessment_score}/10, threshold {config.threshold}). "
-                f"Round {state['round_count']}/{config.max_rounds}."
-            ),
+            "system_message": sys_msg,
         }

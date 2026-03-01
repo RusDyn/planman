@@ -170,21 +170,108 @@ class TestUpdateForPlan(unittest.TestCase):
 
 class TestRecordFeedback(unittest.TestCase):
     def test_records_score_and_feedback(self):
-        state = {"session_id": "test"}
+        state = {"session_id": "test", "round_count": 1}
         state = record_feedback(state, 5, "Needs work")
         self.assertEqual(state["last_score"], 5)
         self.assertEqual(state["last_feedback"], "Needs work")
 
     def test_records_breakdown(self):
-        state = {"session_id": "test"}
+        state = {"session_id": "test", "round_count": 1}
         breakdown = {"completeness": 2, "correctness": 1}
         state = record_feedback(state, 7, "Good", breakdown)
         self.assertEqual(state["last_breakdown"], breakdown)
 
     def test_none_breakdown_not_recorded(self):
-        state = {"session_id": "test"}
+        state = {"session_id": "test", "round_count": 1}
         state = record_feedback(state, 5, "OK", None)
         self.assertNotIn("last_breakdown", state)
+
+
+class TestHistoryAppend(unittest.TestCase):
+    """Test history array management in record_feedback and update_for_plan."""
+
+    def test_history_appends(self):
+        state = {"session_id": "test", "round_count": 1, "history": []}
+        state = record_feedback(state, 5, "Round 1 feedback")
+        self.assertEqual(len(state["history"]), 1)
+        self.assertEqual(state["history"][0]["score"], 5)
+        self.assertEqual(state["history"][0]["round"], 1)
+
+    def test_history_caps_at_20(self):
+        state = {"session_id": "test", "round_count": 1, "history": []}
+        for i in range(25):
+            state["round_count"] = i + 1
+            state = record_feedback(state, i % 10 + 1, f"Feedback {i}")
+        self.assertEqual(len(state["history"]), 20)
+        # Oldest entries should be trimmed
+        self.assertEqual(state["history"][0]["round"], 6)
+
+    def test_history_resets_on_new_plan_file(self):
+        state = {
+            "session_id": "test", "round_count": 2,
+            "plan_hash": compute_plan_hash("Old plan"),
+            "plan_file_path": "/a.md",
+            "history": [{"round": 1, "score": 5}],
+        }
+        state = update_for_plan(state, "New plan", plan_path="/b.md")
+        self.assertEqual(state["round_count"], 1)
+        self.assertEqual(state["history"], [])
+
+    def test_history_preserved_on_same_plan_file(self):
+        state = {
+            "session_id": "test", "round_count": 1,
+            "plan_hash": compute_plan_hash("Plan"),
+            "plan_file_path": "/a.md",
+            "history": [{"round": 1, "score": 5}],
+        }
+        state = update_for_plan(state, "Revised plan", plan_path="/a.md")
+        self.assertEqual(state["round_count"], 2)
+        self.assertEqual(len(state["history"]), 1)
+
+    def test_history_persists_across_save_load(self):
+        session_id = f"test-history-persist-{os.getpid()}"
+        state = load_state(session_id)
+        state = update_for_plan(state, "Plan", plan_path="/a.md")
+        state = record_feedback(state, 6, "Feedback")
+        save_state(state)
+
+        loaded = load_state(session_id)
+        self.assertEqual(len(loaded["history"]), 1)
+        self.assertEqual(loaded["history"][0]["score"], 6)
+        clear_state(session_id)
+
+    def test_history_backward_compat(self):
+        """Old state file without history key loads fine."""
+        session_id = f"test-compat-{os.getpid()}"
+        # Save old-format state (no history key)
+        state = {
+            "session_id": session_id,
+            "round_count": 2,
+            "last_score": 5,
+            "last_feedback": "Old feedback",
+            "plan_hash": "abc",
+        }
+        save_state(state)
+
+        loaded = load_state(session_id)
+        # history defaults to [] via .get()
+        self.assertEqual(loaded.get("history", []), [])
+        clear_state(session_id)
+
+    def test_history_has_timestamp(self):
+        import time
+        state = {"session_id": "test", "round_count": 1, "history": []}
+        before = time.time()
+        state = record_feedback(state, 7, "Feedback")
+        after = time.time()
+        self.assertGreaterEqual(state["history"][0]["timestamp"], before)
+        self.assertLessEqual(state["history"][0]["timestamp"], after)
+
+    def test_history_has_breakdown(self):
+        state = {"session_id": "test", "round_count": 1, "history": []}
+        breakdown = {"completeness": 2, "correctness": 1}
+        state = record_feedback(state, 7, "Feedback", breakdown)
+        self.assertEqual(state["history"][0]["breakdown"], breakdown)
 
 
 class TestSaveStateNanRejection(unittest.TestCase):

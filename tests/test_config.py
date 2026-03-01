@@ -368,5 +368,50 @@ class TestStressTestConfig(unittest.TestCase):
         self.assertEqual(cfg.max_rounds, 2)
 
 
+class TestAutoAnswerConfig(unittest.TestCase):
+    def setUp(self):
+        self._saved = {}
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                self._saved[k] = os.environ.pop(k)
+        self._orig_dir = os.getcwd()
+        self._tmpdir = tempfile.mkdtemp()
+        os.chdir(self._tmpdir)
+
+    def tearDown(self):
+        os.chdir(self._orig_dir)
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                del os.environ[k]
+        os.environ.update(self._saved)
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_auto_answer_default_false(self):
+        cfg = load_config()
+        self.assertFalse(cfg.auto_answer)
+
+    def test_auto_answer_env_override(self):
+        os.environ["PLANMAN_AUTO_ANSWER"] = "true"
+        cfg = load_config()
+        self.assertTrue(cfg.auto_answer)
+
+    def test_auto_answer_file_config(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"auto_answer": True}, f)
+        cfg = load_config()
+        self.assertTrue(cfg.auto_answer)
+
+    def test_auto_answer_slot_enforced(self):
+        """Config __slots__ prevents unknown attributes — existing test covers this."""
+        cfg = Config()
+        # auto_answer is a valid slot
+        self.assertFalse(cfg.auto_answer)
+        # Unknown attribute still raises
+        with self.assertRaises(AttributeError):
+            cfg.nonexistent = "oops"
+
+
 if __name__ == "__main__":
     unittest.main()

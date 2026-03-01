@@ -31,6 +31,7 @@ Run these commands and report the results:
    print(f'source_verify: {c.source_verify}')
    print(f'stress_test: {c.stress_test}')
    print(f'context:     {c.context or \"(none)\"}')
+   print(f'auto_answer: {c.auto_answer}')
    "
    ```
 3. Check for active sessions: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/clear_state.py list`

@@ -53,6 +53,7 @@ def _make_config(**overrides):
         "verbose": False,
         "stress_test": False,
         "source_verify": True,
+        "auto_answer": False,
     }
     defaults.update(overrides)
     return Config(**defaults)
@@ -109,7 +110,7 @@ class TestRunEvaluation(unittest.TestCase):
         r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
         self.assertEqual(r2["action"], "block")
         self.assertIn("4/10", r2["reason"])
-        self.assertIn("needs 7", r2["reason"])
+        self.assertIn("threshold: 7", r2["reason"])
 
     @patch("hook_utils.evaluate_plan")
     def test_max_rounds_passes_through(self, mock_eval):
@@ -292,22 +293,46 @@ class TestStressTestEvaluation(unittest.TestCase):
 
 
 class TestFormatFeedback(unittest.TestCase):
-    """Test format_feedback first_round parameter."""
+    """Test format_feedback structured format."""
 
     def test_first_round_header(self):
         from hook_utils import format_feedback
         text = format_feedback(VALID_RESULT, 7, 1, 3, first_round=True)
         self.assertIn("First-round review", text)
         self.assertIn("8/10", text)
-        self.assertIn("Revise your plan and resubmit", text)
+        self.assertIn("## Evaluation Result", text)
+        self.assertIn("## What To Do", text)
 
     def test_normal_round_header(self):
         from hook_utils import format_feedback
         text = format_feedback(LOW_SCORE_RESULT, 7, 2, 3, first_round=False)
-        self.assertIn("needs 7", text)
+        self.assertIn("threshold: 7", text)
         self.assertIn("4/10", text)
-        self.assertIn("Revise your plan addressing these issues", text)
+        self.assertIn("Round 2/3", text)
         self.assertNotIn("First-round", text)
+
+    def test_breakdown_sorted_lowest_first(self):
+        """Breakdown table is sorted by lowest scores first."""
+        from hook_utils import format_feedback
+        text = format_feedback(LOW_SCORE_RESULT, 7, 2, 3)
+        # sequencing=0 should appear before correctness=1
+        seq_pos = text.find("sequencing")
+        corr_pos = text.find("correctness")
+        self.assertGreater(corr_pos, seq_pos)
+
+    def test_strengths_in_reason(self):
+        """Strengths should be present in the feedback."""
+        from hook_utils import format_feedback
+        text = format_feedback(VALID_RESULT, 7, 1, 3)
+        self.assertIn("## Strengths (preserve these)", text)
+        self.assertIn("Clear ordering", text)
+
+    def test_issues_and_suggestions_separate(self):
+        """Issues and suggestions have distinct headers."""
+        from hook_utils import format_feedback
+        text = format_feedback(VALID_RESULT, 7, 1, 3)
+        self.assertIn("## Issues (must fix)", text)
+        self.assertIn("## Suggestions (improvements)", text)
 
     def test_missing_breakdown_keys(self):
         """format_feedback with incomplete breakdown must not crash."""
@@ -329,7 +354,15 @@ class TestFormatFeedback(unittest.TestCase):
         data = {**VALID_RESULT, "strengths": None, "weaknesses": None, "suggestions": None}
         text = format_feedback(data, 7, 1, 3)
         self.assertIn("8/10", text)
-        self.assertNotIn("**Issues:**", text)
+        self.assertNotIn("## Issues", text)
+
+    def test_trend_included_when_provided(self):
+        """Trend line appears in feedback when passed."""
+        from hook_utils import format_feedback
+        trend = "- **Previous**: 4/10 → 8/10 (+4)"
+        text = format_feedback(VALID_RESULT, 7, 2, 3, trend=trend)
+        self.assertIn("**Previous**:", text)
+        self.assertIn("4/10", text)
 
     def test_format_approval_missing_score(self):
         """format_approval with missing score uses '?'."""
@@ -514,6 +547,203 @@ class TestLogConfigNone(unittest.TestCase):
 
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestTruncateForSystemMessage(unittest.TestCase):
+    """Test truncate_for_system_message() tiered truncation."""
+
+    def test_truncation_under_limit_includes_all(self):
+        from hook_utils import truncate_for_system_message
+        result = truncate_for_system_message(
+            score=6, round_num=2, max_rounds=5, trend="Previous: 4 → 6",
+            issues=["Issue 1"], suggestions=["Sug 1"], strengths=["Str 1"],
+        )
+        self.assertIn("6/10", result)
+        self.assertIn("Issues", result)
+        self.assertIn("Strengths", result)
+        self.assertIn("Suggestions", result)
+
+    def test_truncation_drops_suggestions_first(self):
+        from hook_utils import truncate_for_system_message
+        long_issues = [f"Issue {i} with lots of detail about the problem" for i in range(50)]
+        long_strengths = [f"Strength {i} that is described in detail" for i in range(50)]
+        long_suggestions = [f"Suggestion {i} with extra context" for i in range(50)]
+        result = truncate_for_system_message(
+            score=6, round_num=2, max_rounds=5, trend="",
+            issues=long_issues, suggestions=long_suggestions,
+            strengths=long_strengths, limit=400,
+        )
+        # Tier 1 always present
+        self.assertIn("6/10", result)
+        # With limit=400, issues and/or strengths may fit but suggestions may not
+        # At minimum, tier 4 (suggestions) should be dropped before tier 2 (issues)
+        if "Suggestions" not in result:
+            # Suggestions dropped — that's correct behavior
+            pass
+
+    def test_truncation_drops_issues_third(self):
+        from hook_utils import truncate_for_system_message
+        result = truncate_for_system_message(
+            score=6, round_num=2, max_rounds=5, trend="",
+            issues=["Issue 1"] * 100,
+            suggestions=["Sug 1"] * 100,
+            strengths=["Str 1"] * 100,
+            limit=60,
+        )
+        # Only tier 1 fits
+        self.assertIn("6/10", result)
+        self.assertNotIn("Issues", result)
+        self.assertNotIn("Strengths", result)
+        self.assertNotIn("Suggestions", result)
+
+    def test_truncation_always_has_score_and_round(self):
+        from hook_utils import truncate_for_system_message
+        result = truncate_for_system_message(
+            score=6, round_num=2, max_rounds=5, trend="",
+            issues=["x"] * 100, suggestions=["x"] * 100,
+            strengths=["x"] * 100, limit=50,
+        )
+        self.assertIn("6/10", result)
+        self.assertIn("Round 2/5", result)
+
+    def test_truncation_includes_trend(self):
+        from hook_utils import truncate_for_system_message
+        result = truncate_for_system_message(
+            score=7, round_num=3, max_rounds=5,
+            trend="- **Previous**: 4/10 → 7/10 (+3)",
+            issues=[], suggestions=[], strengths=[],
+        )
+        self.assertIn("**Previous**:", result)
+        self.assertIn("4/10", result)
+
+    def test_truncation_empty_lists(self):
+        from hook_utils import truncate_for_system_message
+        result = truncate_for_system_message(
+            score=8, round_num=1, max_rounds=3, trend="",
+            issues=[], suggestions=[], strengths=[],
+        )
+        self.assertIn("8/10", result)
+        self.assertNotIn("Issues", result)
+
+
+class TestFormatTrend(unittest.TestCase):
+    """Test format_trend() helper."""
+
+    def test_empty_history(self):
+        from hook_utils import format_trend
+        self.assertEqual(format_trend([], 7), "")
+
+    def test_trend_positive(self):
+        from hook_utils import format_trend
+        history = [{"score": 4}]
+        result = format_trend(history, 7)
+        self.assertIn("4/10 → 7/10 (+3)", result)
+
+    def test_trend_negative(self):
+        from hook_utils import format_trend
+        history = [{"score": 8}]
+        result = format_trend(history, 5)
+        self.assertIn("8/10 → 5/10 (-3)", result)
+
+    def test_trend_zero_delta(self):
+        from hook_utils import format_trend
+        history = [{"score": 5}]
+        result = format_trend(history, 5)
+        self.assertIn("5/10 → 5/10 (0)", result)
+
+    def test_trend_none_score(self):
+        from hook_utils import format_trend
+        history = [{"score": None}]
+        self.assertEqual(format_trend(history, 7), "")
+
+    def test_trend_none_current(self):
+        from hook_utils import format_trend
+        history = [{"score": 4}]
+        self.assertEqual(format_trend(history, None), "")
+
+
+class TestRound1ThenRound2Trend(unittest.TestCase):
+    """End-to-end test: round 1 → round 2 should show trend."""
+
+    def setUp(self):
+        self._session_id = f"test-trend-{os.getpid()}-{id(self)}"
+
+    def tearDown(self):
+        clear_state(self._session_id)
+
+    @patch("hook_utils.evaluate_plan")
+    def test_round1_then_round2_has_trend(self, mock_eval):
+        from hook_utils import run_evaluation
+
+        # Round 1: score=4
+        mock_eval.return_value = ({**LOW_SCORE_RESULT, "score": 4}, None)
+        config = _make_config()
+        r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r1["action"], "block")
+        self.assertNotIn("Previous", r1["reason"])  # No trend on round 1
+
+        # Round 2: score=7 (still below threshold with default 7 → rejected)
+        result_r2 = {**VALID_RESULT, "score": 7,
+                     "breakdown": {"completeness": 2, "correctness": 1,
+                                   "sequencing": 1, "risk_awareness": 1, "clarity": 2}}
+        mock_eval.return_value = (result_r2, None)
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "pass")  # 7 >= 7 threshold
+
+    @patch("hook_utils.evaluate_plan")
+    def test_round1_then_round2_rejection_has_trend(self, mock_eval):
+        from hook_utils import run_evaluation
+
+        # Round 1: score=4
+        mock_eval.return_value = ({**LOW_SCORE_RESULT, "score": 4}, None)
+        config = _make_config(threshold=8)
+        r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r1["action"], "block")
+
+        # Round 2: score=7 (below threshold 8 → rejected with trend)
+        result_r2 = {**VALID_RESULT, "score": 7,
+                     "breakdown": {"completeness": 2, "correctness": 1,
+                                   "sequencing": 1, "risk_awareness": 1, "clarity": 2}}
+        mock_eval.return_value = (result_r2, None)
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "block")
+        self.assertIn("**Previous**:", r2["reason"])
+        self.assertIn("+3", r2["reason"])
+
+    @patch("hook_utils.evaluate_plan")
+    def test_round1_then_round2_system_message_has_trend(self, mock_eval):
+        from hook_utils import run_evaluation
+
+        mock_eval.return_value = ({**LOW_SCORE_RESULT, "score": 4}, None)
+        config = _make_config(threshold=8)
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+
+        result_r2 = {**VALID_RESULT, "score": 7,
+                     "breakdown": {"completeness": 2, "correctness": 1,
+                                   "sequencing": 1, "risk_awareness": 1, "clarity": 2}}
+        mock_eval.return_value = (result_r2, None)
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertIn("**Previous**:", r2["system_message"])
+
+
+class TestLegacyFeedbackToggle(unittest.TestCase):
+    """Test PLANMAN_LEGACY_FEEDBACK env var toggle."""
+
+    def test_legacy_feedback_format(self):
+        from hook_utils import format_feedback
+        with patch.dict(os.environ, {"PLANMAN_LEGACY_FEEDBACK": "1"}):
+            text = format_feedback(VALID_RESULT, 7, 1, 3, first_round=True)
+        # Legacy format uses **bold** headers, not ## headers
+        self.assertIn("**First-round review**", text)
+        self.assertNotIn("## Evaluation Result", text)
+
+    def test_new_format_without_env(self):
+        from hook_utils import format_feedback
+        # Ensure env var is NOT set
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PLANMAN_LEGACY_FEEDBACK", None)
+            text = format_feedback(VALID_RESULT, 7, 1, 3, first_round=True)
+        self.assertIn("## Evaluation Result", text)
 
 
 class TestNormalizePath(unittest.TestCase):

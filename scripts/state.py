@@ -48,6 +48,7 @@ def load_state(session_id):
         "last_score": None,
         "last_feedback": None,
         "plan_hash": None,
+        "history": [],
     }
 
 
@@ -96,6 +97,7 @@ def update_for_plan(state, plan_text, plan_path=None):
     if normalized_plan_path and normalized_plan_path != stored_path:
         # New plan file (or first file) = new plan
         state["round_count"] = 1
+        state["history"] = []
     else:
         # Same file = revision
         state["round_count"] = state.get("round_count", 0) + 1
@@ -113,4 +115,16 @@ def record_feedback(state, score, feedback, breakdown=None):
     state["last_feedback"] = feedback
     if breakdown:
         state["last_breakdown"] = breakdown
+    # Append to history
+    history = state.get("history", [])
+    history.append({
+        "round": state.get("round_count"),
+        "score": score,
+        "breakdown": breakdown,
+        "timestamp": time.time(),
+    })
+    # Cap at 20 entries
+    if len(history) > 20:
+        history = history[-20:]
+    state["history"] = history
     return state

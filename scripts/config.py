@@ -39,6 +39,7 @@ DEFAULTS = {
     "stress_test": False,
     "context": "",
     "source_verify": True,
+    "auto_answer": False,
 }
 
 _BOOL_TRUTHY = {"true", "1", "yes", "on"}
@@ -79,6 +80,7 @@ class Config:
         "stress_test",
         "context",
         "source_verify",
+        "auto_answer",
     )
 
     def __init__(self, **kwargs):
@@ -92,6 +94,7 @@ class Config:
         self.stress_test = kwargs.get("stress_test", DEFAULTS["stress_test"])
         self.context = kwargs.get("context", "")
         self.source_verify = kwargs.get("source_verify", DEFAULTS["source_verify"])
+        self.auto_answer = kwargs.get("auto_answer", DEFAULTS["auto_answer"])
 
 
 def _strip_jsonc_comments(text):
@@ -136,6 +139,7 @@ def _load_env_overrides():
         "PLANMAN_STRESS_TEST": ("stress_test", _coerce_bool),
         "PLANMAN_CONTEXT": ("context", str),
         "PLANMAN_SOURCE_VERIFY": ("source_verify", _coerce_bool),
+        "PLANMAN_AUTO_ANSWER": ("auto_answer", _coerce_bool),
     }
     for env_var, (key, coerce) in env_map.items():
         val = os.environ.get(env_var)
@@ -188,4 +192,5 @@ def load_config(cwd=None):
         stress_test=merged["stress_test"],
         context=merged.get("context", ""),
         source_verify=_coerce_bool(merged.get("source_verify", True), "source_verify"),
+        auto_answer=_coerce_bool(merged.get("auto_answer", False), "auto_answer"),
     )

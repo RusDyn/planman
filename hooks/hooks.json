@@ -33,6 +33,16 @@
             "timeout": 600
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/pre_ask_hook.py",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
