@@ -726,26 +726,6 @@ class TestRound1ThenRound2Trend(unittest.TestCase):
         self.assertIn("**Previous**:", r2["system_message"])
 
 
-class TestLegacyFeedbackToggle(unittest.TestCase):
-    """Test PLANMAN_LEGACY_FEEDBACK env var toggle."""
-
-    def test_legacy_feedback_format(self):
-        from hook_utils import format_feedback
-        with patch.dict(os.environ, {"PLANMAN_LEGACY_FEEDBACK": "1"}):
-            text = format_feedback(VALID_RESULT, 7, 1, 3, first_round=True)
-        # Legacy format uses **bold** headers, not ## headers
-        self.assertIn("**First-round review**", text)
-        self.assertNotIn("## Evaluation Result", text)
-
-    def test_new_format_without_env(self):
-        from hook_utils import format_feedback
-        # Ensure env var is NOT set
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("PLANMAN_LEGACY_FEEDBACK", None)
-            text = format_feedback(VALID_RESULT, 7, 1, 3, first_round=True)
-        self.assertIn("## Evaluation Result", text)
-
-
 class TestNormalizePath(unittest.TestCase):
     """Test normalize_path from path_utils."""
 

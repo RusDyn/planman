@@ -84,62 +84,6 @@ def format_trend(history, current_score):
     return f"- **Previous**: {prev_score}/10 → {current_score}/10 ({sign}{delta})"
 
 
-def _format_feedback_legacy(data, threshold, round_num, max_rounds, first_round=False):
-    """Legacy feedback format (flat markdown). Activated via PLANMAN_LEGACY_FEEDBACK env var."""
-    score = data.get("score", "?")
-    breakdown = data.get("breakdown") or {}
-    weaknesses = data.get("weaknesses") or []
-    suggestions = data.get("suggestions") or []
-    strengths = data.get("strengths") or []
-
-    if first_round:
-        header = (
-            f"**First-round review** — your plan scored **{score}/10**. "
-            f"Round 1/{max_rounds}."
-        )
-    else:
-        header = (
-            f"Your plan scored **{score}/10** (needs {threshold}). "
-            f"Round {round_num}/{max_rounds}."
-        )
-
-    lines = [
-        header,
-        "",
-        f"**Breakdown**: completeness={breakdown.get('completeness', '?')}/2, "
-        f"correctness={breakdown.get('correctness', '?')}/2, "
-        f"sequencing={breakdown.get('sequencing', '?')}/2, "
-        f"risk_awareness={breakdown.get('risk_awareness', '?')}/2, "
-        f"clarity={breakdown.get('clarity', '?')}/2",
-    ]
-
-    if strengths:
-        lines.append("")
-        lines.append("**Issues:**")
-        for s in strengths:
-            lines.append(f"- {s}")
-
-    if weaknesses:
-        lines.append("")
-        lines.append("**Issues:**")
-        for w in weaknesses:
-            lines.append(f"- {w}")
-
-    if suggestions:
-        lines.append("")
-        lines.append("**Suggestions:**")
-        for s in suggestions:
-            lines.append(f"- {s}")
-
-    lines.append("")
-    if first_round:
-        lines.append("Revise your plan and resubmit.")
-    else:
-        lines.append("Revise your plan addressing these issues.")
-
-    return "\n".join(lines)
-
-
 def format_feedback(data, threshold, round_num, max_rounds, first_round=False, trend=""):
     """Format evaluation result into structured, actionable feedback.
 
@@ -151,9 +95,6 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False, t
         first_round: Whether this is the first round (mandatory rejection).
         trend: Trend line string from format_trend() (empty on round 1).
     """
-    if os.environ.get("PLANMAN_LEGACY_FEEDBACK"):
-        return _format_feedback_legacy(data, threshold, round_num, max_rounds, first_round)
-
     score = data.get("score", "?")
     breakdown = data.get("breakdown") or {}
     weaknesses = data.get("weaknesses") or []
