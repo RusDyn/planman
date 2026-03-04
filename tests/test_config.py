@@ -361,11 +361,11 @@ class TestStressTestConfig(unittest.TestCase):
         cfg = load_config()
         self.assertTrue(cfg.stress_test)
 
-    def test_stress_test_clamps_max_rounds(self):
+    def test_stress_test_allows_max_rounds_one(self):
         os.environ["PLANMAN_STRESS_TEST"] = "true"
         os.environ["PLANMAN_MAX_ROUNDS"] = "1"
         cfg = load_config()
-        self.assertEqual(cfg.max_rounds, 2)
+        self.assertEqual(cfg.max_rounds, 1)  # no longer clamped to 2
 
 
 class TestAutoAnswerConfig(unittest.TestCase):

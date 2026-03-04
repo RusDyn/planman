@@ -55,10 +55,11 @@ class TestAutoAnswerDisabled(unittest.TestCase):
         }
         stdout, stderr, rc = _run_hook(stdin, cwd=self._tmpdir)
         self.assertEqual(rc, 0)
-        # No JSON with decision=block
+        # Should output allow, not deny
         if stdout.strip():
             data = json.loads(stdout)
-            self.assertNotEqual(data.get("decision"), "block")
+            perm = data.get("hookSpecificOutput", {}).get("permissionDecision")
+            self.assertNotEqual(perm, "deny")
 
 
 class TestInputValidation(unittest.TestCase):
@@ -78,7 +79,8 @@ class TestInputValidation(unittest.TestCase):
         self.assertEqual(rc, 0)
         if stdout.strip():
             data = json.loads(stdout)
-            self.assertNotEqual(data.get("decision"), "block")
+            perm = data.get("hookSpecificOutput", {}).get("permissionDecision")
+            self.assertNotEqual(perm, "deny")
 
     def test_missing_tool_input(self):
         self._assert_allows({"cwd": self._tmpdir})
@@ -109,7 +111,8 @@ class TestInputValidation(unittest.TestCase):
         self.assertEqual(rc, 0)
         if stdout.strip():
             data = json.loads(stdout)
-            self.assertNotEqual(data.get("decision"), "block")
+            perm = data.get("hookSpecificOutput", {}).get("permissionDecision")
+            self.assertNotEqual(perm, "deny")
 
     def test_empty_input(self):
         stdout, stderr, rc = _run_hook("", cwd=self._tmpdir)
@@ -144,10 +147,11 @@ class TestAutoAnswerBlocking(unittest.TestCase):
         stdout, stderr, rc = _run_hook(stdin, cwd=self._tmpdir)
         self.assertEqual(rc, 0)
         data = json.loads(stdout)
-        self.assertEqual(data["decision"], "block")
-        self.assertIn("Planman auto-answer", data["reason"])
-        self.assertIn("TypeScript", data["reason"])
-        self.assertIn("Evidence", data["reason"])
+        self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
+        reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("Planman auto-answer", reason)
+        self.assertIn("TypeScript", reason)
+        self.assertIn("Evidence", reason)
         self.assertIn("systemMessage", data)
 
     def test_unanswerable_allows(self):
@@ -166,7 +170,8 @@ class TestAutoAnswerBlocking(unittest.TestCase):
         self.assertEqual(rc, 0)
         if stdout.strip():
             data = json.loads(stdout)
-            self.assertNotEqual(data.get("decision"), "block")
+            perm = data.get("hookSpecificOutput", {}).get("permissionDecision")
+            self.assertNotEqual(perm, "deny")
 
     def test_any_unanswerable_allows_all(self):
         """If ANY question is unanswerable, ALL pass through."""
@@ -191,7 +196,8 @@ class TestAutoAnswerBlocking(unittest.TestCase):
         self.assertEqual(rc, 0)
         if stdout.strip():
             data = json.loads(stdout)
-            self.assertNotEqual(data.get("decision"), "block")
+            perm = data.get("hookSpecificOutput", {}).get("permissionDecision")
+            self.assertNotEqual(perm, "deny")
 
 
 class TestFailOpen(unittest.TestCase):
@@ -214,7 +220,8 @@ class TestFailOpen(unittest.TestCase):
         self.assertEqual(rc, 0)
         if stdout.strip():
             data = json.loads(stdout)
-            self.assertNotEqual(data.get("decision"), "block")
+            perm = data.get("hookSpecificOutput", {}).get("permissionDecision")
+            self.assertNotEqual(perm, "deny")
 
 
 class TestSiblingImport(unittest.TestCase):

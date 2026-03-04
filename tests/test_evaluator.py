@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from evaluator import (
+    _extract_codex_error,
     build_prompt,
     check_codex_installed,
     evaluate_plan,
@@ -301,6 +302,8 @@ class TestEvaluatePlan(unittest.TestCase):
         result, error = evaluate_plan("My plan", config)
         self.assertIsNone(result)
         self.assertIn("exit 1", error)
+        # "auth failed" contains no known pattern → tail fallback
+        self.assertIn("auth failed", error)
 
     @patch("evaluator.subprocess.run")
     @patch("evaluator.check_codex_installed", return_value=True)
@@ -422,6 +425,86 @@ class TestMissingSchema(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("schema file not found", error)
         self.assertIn("CLAUDE_PLUGIN_ROOT", error)
+
+
+class TestExtractCodexError(unittest.TestCase):
+    def test_usage_limit_detected(self):
+        stderr = "OpenAI Codex v0.105\n---\n" + "x" * 5000 + "\nERROR: You've hit your usage limit.\n"
+        result = _extract_codex_error(stderr)
+        self.assertIn("usage limit reached", result)
+
+    def test_rate_limit_detected(self):
+        result = _extract_codex_error("rate limit exceeded")
+        self.assertIn("Rate limited", result)
+
+    def test_authentication_detected(self):
+        result = _extract_codex_error("authentication error: invalid token")
+        self.assertIn("authentication failed", result)
+
+    def test_connection_error_detected(self):
+        result = _extract_codex_error("Could not connect to api.openai.com")
+        self.assertIn("Network error", result)
+
+    def test_context_length_detected(self):
+        result = _extract_codex_error("context length exceeded for model gpt-4")
+        self.assertIn("too large", result)
+
+    def test_model_not_found_detected(self):
+        result = _extract_codex_error("model not found: gpt-5-turbo")
+        self.assertIn("PLANMAN_MODEL", result)
+
+    def test_unknown_error_returns_tail(self):
+        stderr = "banner\n" + "x" * 5000 + "\nSome unknown error\n"
+        result = _extract_codex_error(stderr)
+        self.assertIn("unknown error", result)
+        self.assertTrue(result.startswith("..."))
+
+    def test_empty_stderr(self):
+        result = _extract_codex_error("")
+        self.assertEqual(result, "no stderr output")
+
+    def test_none_stderr(self):
+        result = _extract_codex_error(None)
+        self.assertEqual(result, "no stderr output")
+
+
+class TestLongStderrCapture(unittest.TestCase):
+    def setUp(self):
+        reset_codex_cache()
+
+    def tearDown(self):
+        reset_codex_cache()
+
+    @patch("evaluator.subprocess.run")
+    @patch("evaluator.check_codex_installed", return_value=True)
+    def test_nonzero_exit_long_stderr_captures_tail(self, mock_check, mock_run):
+        """Unknown errors show stderr tail, not banner head."""
+        banner = "OpenAI Codex v0.105.0\n" + "-" * 40 + "\n"
+        prompt_echo = "user\n" + "x" * 5000
+        actual_error = "\nSome specific failure detail\n"
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="",
+            stderr=banner + prompt_echo + actual_error,
+        )
+        result, error = evaluate_plan("My plan", _make_config())
+        self.assertIsNone(result)
+        self.assertIn("specific failure detail", error)
+        self.assertNotIn("OpenAI Codex v0.105", error)  # banner NOT in output
+
+    @patch("evaluator.subprocess.run")
+    @patch("evaluator.check_codex_installed", return_value=True)
+    def test_nonzero_exit_known_pattern_in_long_stderr(self, mock_check, mock_run):
+        """Known error pattern in long stderr is detected over tail."""
+        banner = "OpenAI Codex v0.105.0\n" + "-" * 40 + "\n"
+        prompt_echo = "x" * 5000
+        actual_error = "\nYou've hit your usage limit\n"
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="",
+            stderr=banner + prompt_echo + actual_error,
+        )
+        result, error = evaluate_plan("My plan", _make_config())
+        self.assertIsNone(result)
+        self.assertIn("usage limit reached", error)
 
 
 if __name__ == "__main__":

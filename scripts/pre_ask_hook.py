@@ -8,9 +8,9 @@ PreToolUse input (stdin JSON):
   cwd: str (project directory)
 
 PreToolUse output (stdout):
-  {"decision":"block","reason":"..."} → Claude reads answer and continues
+  {"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"..."}} → Claude reads answer
   empty stdout (no output) → question reaches user normally
-  {"systemMessage":"..."} → question reaches user, with info message
+  {"hookSpecificOutput":{"permissionDecision":"allow"}} → question reaches user
 """
 
 import json
@@ -28,9 +28,12 @@ from question_heuristics import analyze_question
 
 
 def _output_block(reason, system_message=None):
-    result = {"decision": "block"}
+    result = {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+    }}
     if reason:
-        result["reason"] = reason
+        result["hookSpecificOutput"]["permissionDecisionReason"] = reason
     if system_message:
         result["systemMessage"] = system_message
     json.dump(result, sys.stdout, ensure_ascii=True)
@@ -38,8 +41,13 @@ def _output_block(reason, system_message=None):
 
 
 def _output_allow(system_message=None):
+    result = {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+    }}
     if system_message:
-        json.dump({"systemMessage": system_message}, sys.stdout, ensure_ascii=True)
+        result["systemMessage"] = system_message
+    json.dump(result, sys.stdout, ensure_ascii=True)
     sys.exit(0)
 
 

@@ -257,7 +257,7 @@ class TestStressTestEvaluation(unittest.TestCase):
 
     @patch("hook_utils.evaluate_plan")
     def test_stress_test_skips_codex_round_one(self, mock_eval):
-        """stress_test=true, round 1 → evaluate_plan NOT called."""
+        """stress_test=true, round 1 → evaluate_plan NOT called, blocking."""
         from hook_utils import run_evaluation
         config = _make_config(stress_test=True)
 
@@ -272,7 +272,7 @@ class TestStressTestEvaluation(unittest.TestCase):
         mock_eval.return_value = (VALID_RESULT, None)
         config = _make_config(stress_test=True)
 
-        # Round 1: stress-test skip
+        # Round 1: stress-test block
         r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
         self.assertEqual(r1["action"], "block")
         mock_eval.assert_not_called()
@@ -290,6 +290,24 @@ class TestStressTestEvaluation(unittest.TestCase):
 
         run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
         mock_eval.assert_called_once()
+
+    @patch("hook_utils.evaluate_plan")
+    def test_stress_test_max_rounds_one_skips_codex_entirely(self, mock_eval):
+        """stress_test=true + max_rounds=1 → Codex never called, both rounds pass."""
+        from hook_utils import run_evaluation
+        config = _make_config(stress_test=True, max_rounds=1)
+
+        # Round 1: stress-test block without Codex
+        r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r1["action"], "block")
+        self.assertIn(config.stress_test_prompt, r1["reason"])
+        mock_eval.assert_not_called()
+
+        # Round 2: exceeds max_rounds → passes through without Codex
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "pass")
+        mock_eval.assert_not_called()  # Codex NEVER called
+        self.assertIn("Max evaluation rounds", r2["system_message"])
 
 
 class TestFormatFeedback(unittest.TestCase):
@@ -320,12 +338,12 @@ class TestFormatFeedback(unittest.TestCase):
         corr_pos = text.find("correctness")
         self.assertGreater(corr_pos, seq_pos)
 
-    def test_strengths_in_reason(self):
-        """Strengths should be present in the feedback."""
+    def test_strengths_not_in_reason(self):
+        """Strengths should not be present in the feedback (noise reduction)."""
         from hook_utils import format_feedback
         text = format_feedback(VALID_RESULT, 7, 1, 3)
-        self.assertIn("## Strengths (preserve these)", text)
-        self.assertIn("Clear ordering", text)
+        self.assertNotIn("Strengths", text)
+        self.assertNotIn("Clear ordering", text)
 
     def test_issues_and_suggestions_separate(self):
         """Issues and suggestions have distinct headers."""
@@ -560,7 +578,7 @@ class TestTruncateForSystemMessage(unittest.TestCase):
         )
         self.assertIn("6/10", result)
         self.assertIn("Issues", result)
-        self.assertIn("Strengths", result)
+        self.assertNotIn("Strengths", result)
         self.assertIn("Suggestions", result)
 
     def test_truncation_drops_suggestions_first(self):

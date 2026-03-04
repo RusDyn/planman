@@ -18,7 +18,7 @@ try:
 except ImportError:
     fcntl = None
 
-from config import DEFAULT_STRESS_TEST_PROMPT, load_config
+from config import load_config
 from evaluator import check_codex_installed, evaluate_plan
 from state import (
     compute_plan_hash,
@@ -130,13 +130,6 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False, t
         if c not in breakdown:
             lines.append(f"| {c} | ?/2 |")
 
-    # Strengths — kept in reason to prevent regression
-    if strengths:
-        lines.append("")
-        lines.append("## Strengths (preserve these)")
-        for s in strengths:
-            lines.append(f"- {s}")
-
     # Issues — must fix
     if weaknesses:
         lines.append("")
@@ -154,10 +147,7 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False, t
     # Call to action
     lines.append("")
     lines.append("## What To Do")
-    if first_round:
-        lines.append("Revise the plan addressing the issues above. Preserve the strengths. Then call ExitPlanMode.")
-    else:
-        lines.append("Revise the plan addressing the issues above. Preserve the strengths. Then call ExitPlanMode.")
+    lines.append("Revise the plan addressing the issues above. Then call ExitPlanMode.")
 
     return "\n".join(lines)
 
@@ -171,8 +161,7 @@ def truncate_for_system_message(score, round_num, max_rounds, trend,
 
     Tier 1 (always included): Score + round + trend
     Tier 2: Issues (first 3)
-    Tier 3: Strengths (first 3)
-    Tier 4: Suggestions (first 3)
+    Tier 3: Suggestions (first 3)
     """
     # Tier 1 — always included, never truncated
     parts = [f"Planman: {score}/10 | Round {round_num}/{max_rounds}"]
@@ -188,25 +177,17 @@ def truncate_for_system_message(score, round_num, max_rounds, trend,
             tier2_lines.append(f"- {item}")
     tier2 = "\n".join(tier2_lines)
 
-    # Tier 3 — strengths
+    # Tier 3 — suggestions
     tier3_lines = []
-    if strengths:
-        tier3_lines.append("\nStrengths:")
-        for item in strengths[:3]:
+    if suggestions:
+        tier3_lines.append("\nSuggestions:")
+        for item in suggestions[:3]:
             tier3_lines.append(f"- {item}")
     tier3 = "\n".join(tier3_lines)
 
-    # Tier 4 — suggestions
-    tier4_lines = []
-    if suggestions:
-        tier4_lines.append("\nSuggestions:")
-        for item in suggestions[:3]:
-            tier4_lines.append(f"- {item}")
-    tier4 = "\n".join(tier4_lines)
-
     # Build by appending tiers — stop at first tier that doesn't fit
     result = tier1
-    for tier in [tier2, tier3, tier4]:
+    for tier in [tier2, tier3]:
         if not tier:
             continue
         if len(result + tier) <= limit:
@@ -220,15 +201,7 @@ def truncate_for_system_message(score, round_num, max_rounds, trend,
 def format_approval(data):
     """Format approval message."""
     score = data.get("score", "?")
-    strengths = data.get("strengths") or []
-
-    lines = [f"Plan approved (score: {score}/10)."]
-    if strengths:
-        lines.append("")
-        lines.append("**Strengths:**")
-        for s in strengths[:3]:
-            lines.append(f"- {s}")
-    return "\n".join(lines)
+    return f"Plan approved (score: {score}/10)."
 
 
 def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
@@ -250,23 +223,33 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     state = update_for_plan(state, plan_text, plan_path)
     log(f"round {state['round_count']}/{config.max_rounds}", config, cwd)
 
-    # Check round limit — pass through and let the user decide
+    # Check round limit — pass through with clear proceed signal
     if state["round_count"] > config.max_rounds:
-        log("max rounds exceeded — passing through for human decision", config, cwd)
+        log("max rounds exceeded — auto-approving", config, cwd)
+        try:
+            save_state(state)
+        except (OSError, ValueError) as e:
+            log(f"failed to save state: {e}", config, cwd)
+        last_score = state.get('last_score')
+        if last_score is not None:
+            score_msg = f"Last score was {last_score}/10 (threshold: {config.threshold}). "
+        else:
+            score_msg = ""
         return {
             "action": "pass",
             "reason": None,
             "system_message": (
                 f"Planman: Max evaluation rounds ({config.max_rounds}) reached. "
-                f"Last score was {state.get('last_score', '?')}/10 "
-                f"(threshold: {config.threshold}). "
-                "Proceeding without approval — please review the plan yourself."
+                f"{score_msg}"
+                "Plan accepted — proceed with implementation."
             ),
         }
 
-    # Stress-test mode: skip Codex on round 1, reject with built-in prompt
+    # Stress-test mode: skip Codex on round 1, block with prompt as reason.
+    # Round 2+ continues with normal Codex evaluation.
     if config.stress_test and state["round_count"] == 1:
-        state = record_feedback(state, None, DEFAULT_STRESS_TEST_PROMPT, None)
+        prompt = config.stress_test_prompt
+        state = record_feedback(state, None, prompt, None)
         try:
             save_state(state)
         except (OSError, ValueError) as e:
@@ -274,7 +257,7 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
         log("stress-test mode: first plan rejected without evaluation", config, cwd)
         return {
             "action": "block",
-            "reason": DEFAULT_STRESS_TEST_PROMPT,
+            "reason": prompt,
             "system_message": (
                 f"Planman: Stress-test mode — first plan rejected for deep revision. "
                 f"Round 1/{config.max_rounds}."
@@ -289,16 +272,22 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
 
     if error:
         log(f"evaluation error: {error}", config, cwd)
+        # Persist state so round_count advances (prevents infinite retry loops)
+        try:
+            save_state(state)
+        except (OSError, ValueError) as e:
+            log(f"failed to save state: {e}", config, cwd)
+        error_brief = error[:500] if len(error) > 500 else error
         if config.fail_open:
             return {
                 "action": "pass",
                 "reason": None,
-                "system_message": f"Planman: Evaluation failed ({error}). Passing through (fail-open).",
+                "system_message": f"Planman: Evaluation failed ({error_brief}). Passing through (fail-open).",
             }
         else:
             return {
                 "action": "block",
-                "reason": f"Planman evaluation failed: {error}. Set PLANMAN_FAIL_OPEN=true to pass through on errors.",
+                "reason": f"Planman evaluation failed: {error_brief}. Set PLANMAN_FAIL_OPEN=true to pass through on errors.",
                 "system_message": None,
             }
 

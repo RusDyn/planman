@@ -12,20 +12,20 @@ import re
 DEFAULT_RUBRIC = """\
 Score the plan on these 5 criteria (0-2 each, 10 max):
 
-1. **Completeness** (0-2): Does the plan address all stated requirements? Are there gaps? Completeness includes a verification strategy (tests, manual checks, rollback plan).
+1. **Completeness** (0-2): Does the plan address all stated requirements with no critical gaps?
 2. **Correctness** (0-2): Is the technical approach sound? Any flaws or misunderstandings?
 3. **Sequencing** (0-2): Are steps ordered logically? Are dependencies respected?
-4. **Risk Awareness** (0-2): Does the plan identify edge cases, failure modes, or risks?
-5. **Clarity** (0-2): Are steps specific and actionable? Could a developer follow them?
+4. **Risk Awareness** (0-2): Does the plan address risks proportionate to the task's scope? Simple tasks need minimal risk coverage.
+5. **Clarity** (0-2): Are steps specific and actionable? Could a developer follow them without ambiguity?
 
 The overall score MUST equal the sum of the 5 breakdown scores.
-Be strict — a score of 7+ means the plan is ready to execute as-is.\
+A score of 7+ means the plan is ready to execute. Prefer simple, focused plans — do NOT penalize for omitting rollback plans, exhaustive risk analysis, or verification strategies unless the task specifically requires them.\
 """
 
 DEFAULT_STRESS_TEST_PROMPT = """\
-Stress-test this plan. Run a deep research pass with an agents team of researchers. \
-Find the weak spots, fix them, assume this plan is a 6/10 right now, make it a 10/10. \
-Don't think about implementation complexity and hours, focus on value.\
+Review this plan for clarity and completeness. Identify the 1-2 most impactful gaps, \
+ambiguities, or risks. Make targeted improvements to address those specific issues. \
+Keep the plan simple and focused — add only what is essential, not everything possible.\
 """
 
 DEFAULTS = {
@@ -40,6 +40,7 @@ DEFAULTS = {
     "context": "",
     "source_verify": True,
     "auto_answer": False,
+    "stress_test_prompt": "",
 }
 
 _BOOL_TRUTHY = {"true", "1", "yes", "on"}
@@ -81,6 +82,7 @@ class Config:
         "context",
         "source_verify",
         "auto_answer",
+        "stress_test_prompt",
     )
 
     def __init__(self, **kwargs):
@@ -95,6 +97,7 @@ class Config:
         self.context = kwargs.get("context", "")
         self.source_verify = kwargs.get("source_verify", DEFAULTS["source_verify"])
         self.auto_answer = kwargs.get("auto_answer", DEFAULTS["auto_answer"])
+        self.stress_test_prompt = kwargs.get("stress_test_prompt", "") or DEFAULT_STRESS_TEST_PROMPT
 
 
 def _strip_jsonc_comments(text):
@@ -176,10 +179,6 @@ def load_config(cwd=None):
     # Coerce stress_test to bool
     merged["stress_test"] = _coerce_bool(merged["stress_test"], "stress_test")
 
-    # Guard: stress-test needs at least 2 rounds
-    if merged["stress_test"] and merged["max_rounds"] < 2:
-        merged["max_rounds"] = 2
-
     # Build Config, mapping custom_rubric to rubric
     return Config(
         threshold=merged["threshold"],
@@ -193,4 +192,5 @@ def load_config(cwd=None):
         context=merged.get("context", ""),
         source_verify=_coerce_bool(merged.get("source_verify", True), "source_verify"),
         auto_answer=_coerce_bool(merged.get("auto_answer", False), "auto_answer"),
+        stress_test_prompt=merged.get("stress_test_prompt", ""),
     )

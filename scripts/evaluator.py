@@ -18,6 +18,28 @@ _CODEX_BIN = "codex"
 
 _codex_available = None  # cached result
 
+# Known codex error patterns → actionable messages
+_KNOWN_ERRORS = [
+    ("usage limit", "ChatGPT usage limit reached. Upgrade at https://chatgpt.com/explore/pro or wait for reset."),
+    ("rate limit", "Rate limited by OpenAI. Wait a few minutes and retry."),
+    ("authentication", "Codex authentication failed. Run `codex auth` to re-authenticate."),
+    ("could not connect", "Network error connecting to OpenAI. Check internet connection."),
+    ("context length exceeded", "Plan + rubric too large for model context. Reduce plan size."),
+    ("model not found", "Configured model not available. Check PLANMAN_MODEL setting."),
+]
+
+
+def _extract_codex_error(stderr):
+    """Extract actionable error from codex stderr, or return tail snippet."""
+    if not stderr:
+        return "no stderr output"
+    lower = stderr.lower()
+    for pattern, message in _KNOWN_ERRORS:
+        if pattern in lower:
+            return message
+    # Fallback: return tail where actual errors live (after banner + prompt echo)
+    return f"...{stderr[-1500:]}"
+
 
 def check_codex_installed(codex_path=None):
     """Check if codex CLI is installed. Result is cached."""
@@ -117,6 +139,7 @@ def evaluate_plan(plan_text, config, previous_feedback=None, round_number=1, cwd
             input=prompt,                     # Pass prompt via stdin
             capture_output=True,
             text=True,
+            errors='replace',                 # prevent UnicodeDecodeError on bad codex output
             timeout=effective_timeout,
             cwd=cwd or os.getcwd(),
         )
@@ -125,17 +148,18 @@ def evaluate_plan(plan_text, config, previous_feedback=None, round_number=1, cwd
     except FileNotFoundError:
         reset_codex_cache()
         return None, "codex not found. Install: npm install -g @openai/codex"
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         return None, f"failed to run codex: {e}"
 
     if config.verbose:
         print(f"[planman] codex exit code: {result.returncode}", file=sys.stderr)
         if result.stderr:
-            print(f"[planman] codex stderr: {result.stderr[:2000]}", file=sys.stderr)
+            verbose_limit = 4000 if result.returncode != 0 else 2000
+            print(f"[planman] codex stderr (last {verbose_limit}): {result.stderr[-verbose_limit:]}", file=sys.stderr)
 
     if result.returncode != 0:
-        stderr_snippet = (result.stderr or "")[:1000]
-        return None, f"codex exec failed (exit {result.returncode}): {stderr_snippet}"
+        error_detail = _extract_codex_error(result.stderr)
+        return None, f"codex exec failed (exit {result.returncode}): {error_detail}"
 
     return parse_codex_output(result.stdout)
 

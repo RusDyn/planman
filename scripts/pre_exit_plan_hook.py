@@ -12,8 +12,8 @@ PreToolUse input (stdin JSON):
   ...
 
 PreToolUse output (stdout JSON):
-  {"decision":"block","reason":"..."} → Claude revises and tries again
-  {} or no output → ExitPlanMode proceeds normally
+  {"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"..."}} → Claude revises
+  {"hookSpecificOutput":{"permissionDecision":"allow"}} or no output → ExitPlanMode proceeds
 """
 
 import glob
@@ -35,9 +35,12 @@ from path_utils import normalize_path
 
 def _output_block(reason, system_message=None):
     """Output a block decision and exit."""
-    result = {"decision": "block"}
+    result = {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+    }}
     if reason:
-        result["reason"] = reason
+        result["hookSpecificOutput"]["permissionDecisionReason"] = reason
     if system_message:
         result["systemMessage"] = system_message
     json.dump(result, sys.stdout, ensure_ascii=True)
@@ -45,9 +48,14 @@ def _output_block(reason, system_message=None):
 
 
 def _output_allow(system_message=None):
-    """Output an allow decision (empty or with system message) and exit."""
+    """Output an allow decision and exit."""
+    result = {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+    }}
     if system_message:
-        json.dump({"systemMessage": system_message}, sys.stdout, ensure_ascii=True)
+        result["systemMessage"] = system_message
+    json.dump(result, sys.stdout, ensure_ascii=True)
     sys.exit(0)
 
 
@@ -113,7 +121,7 @@ def _read_plan_text(path):
         with open(path, "r", encoding="utf-8") as f:
             text = f.read()
         return (text, None) if text.strip() else (None, None)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None, None
 
 
