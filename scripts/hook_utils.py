@@ -154,48 +154,11 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False, t
 
 def truncate_for_system_message(score, round_num, max_rounds, trend,
                                  issues, suggestions, strengths, limit=2000):
-    """Build systemMessage with deterministic truncation under char limit.
-
-    Builds message by appending tiers. After each tier, checks length.
-    If over limit, stops adding and returns what fits.
-
-    Tier 1 (always included): Score + round + trend
-    Tier 2: Issues (first 3)
-    Tier 3: Suggestions (first 3)
-    """
-    # Tier 1 — always included, never truncated
+    """Build systemMessage: score + round + trend only (details are in reason)."""
     parts = [f"Planman: {score}/10 | Round {round_num}/{max_rounds}"]
     if trend:
         parts.append(trend)
-    tier1 = "\n".join(parts)
-
-    # Tier 2 — issues
-    tier2_lines = []
-    if issues:
-        tier2_lines.append("\nIssues:")
-        for item in issues[:3]:
-            tier2_lines.append(f"- {item}")
-    tier2 = "\n".join(tier2_lines)
-
-    # Tier 3 — suggestions
-    tier3_lines = []
-    if suggestions:
-        tier3_lines.append("\nSuggestions:")
-        for item in suggestions[:3]:
-            tier3_lines.append(f"- {item}")
-    tier3 = "\n".join(tier3_lines)
-
-    # Build by appending tiers — stop at first tier that doesn't fit
-    result = tier1
-    for tier in [tier2, tier3]:
-        if not tier:
-            continue
-        if len(result + tier) <= limit:
-            result += tier
-        else:
-            break  # Stop adding — later tiers won't fit either
-
-    return result
+    return "\n".join(parts)
 
 
 def format_approval(data):

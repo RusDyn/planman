@@ -570,49 +570,16 @@ class TestLogConfigNone(unittest.TestCase):
 class TestTruncateForSystemMessage(unittest.TestCase):
     """Test truncate_for_system_message() tiered truncation."""
 
-    def test_truncation_under_limit_includes_all(self):
+    def test_truncation_score_only_no_details(self):
         from hook_utils import truncate_for_system_message
         result = truncate_for_system_message(
             score=6, round_num=2, max_rounds=5, trend="Previous: 4 → 6",
             issues=["Issue 1"], suggestions=["Sug 1"], strengths=["Str 1"],
         )
         self.assertIn("6/10", result)
-        self.assertIn("Issues", result)
-        self.assertNotIn("Strengths", result)
-        self.assertIn("Suggestions", result)
-
-    def test_truncation_drops_suggestions_first(self):
-        from hook_utils import truncate_for_system_message
-        long_issues = [f"Issue {i} with lots of detail about the problem" for i in range(50)]
-        long_strengths = [f"Strength {i} that is described in detail" for i in range(50)]
-        long_suggestions = [f"Suggestion {i} with extra context" for i in range(50)]
-        result = truncate_for_system_message(
-            score=6, round_num=2, max_rounds=5, trend="",
-            issues=long_issues, suggestions=long_suggestions,
-            strengths=long_strengths, limit=400,
-        )
-        # Tier 1 always present
-        self.assertIn("6/10", result)
-        # With limit=400, issues and/or strengths may fit but suggestions may not
-        # At minimum, tier 4 (suggestions) should be dropped before tier 2 (issues)
-        if "Suggestions" not in result:
-            # Suggestions dropped — that's correct behavior
-            pass
-
-    def test_truncation_drops_issues_third(self):
-        from hook_utils import truncate_for_system_message
-        result = truncate_for_system_message(
-            score=6, round_num=2, max_rounds=5, trend="",
-            issues=["Issue 1"] * 100,
-            suggestions=["Sug 1"] * 100,
-            strengths=["Str 1"] * 100,
-            limit=60,
-        )
-        # Only tier 1 fits
-        self.assertIn("6/10", result)
         self.assertNotIn("Issues", result)
-        self.assertNotIn("Strengths", result)
         self.assertNotIn("Suggestions", result)
+        self.assertNotIn("Strengths", result)
 
     def test_truncation_always_has_score_and_round(self):
         from hook_utils import truncate_for_system_message
