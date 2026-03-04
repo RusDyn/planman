@@ -329,15 +329,6 @@ class TestFormatFeedback(unittest.TestCase):
         self.assertIn("Round 2/3", text)
         self.assertNotIn("First-round", text)
 
-    def test_breakdown_sorted_lowest_first(self):
-        """Breakdown table is sorted by lowest scores first."""
-        from hook_utils import format_feedback
-        text = format_feedback(LOW_SCORE_RESULT, 7, 2, 3)
-        # sequencing=0 should appear before correctness=1
-        seq_pos = text.find("sequencing")
-        corr_pos = text.find("correctness")
-        self.assertGreater(corr_pos, seq_pos)
-
     def test_strengths_not_in_reason(self):
         """Strengths should not be present in the feedback (noise reduction)."""
         from hook_utils import format_feedback
@@ -358,7 +349,6 @@ class TestFormatFeedback(unittest.TestCase):
         partial = {"score": 5, "breakdown": {"completeness": 2}}
         text = format_feedback(partial, 7, 1, 3)
         self.assertIn("5/10", text)
-        self.assertIn("?/2", text)  # missing keys show as ?
 
     def test_missing_score(self):
         """format_feedback with missing score uses '?'."""

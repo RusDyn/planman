@@ -116,20 +116,6 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False, t
     if trend:
         lines.append(trend)
 
-    # Breakdown sorted by lowest scores first
-    lines.append("")
-    lines.append("## Breakdown (lowest scores first)")
-    lines.append("| Criterion | Score |")
-    lines.append("|-----------|-------|")
-    sorted_breakdown = sorted(breakdown.items(), key=lambda x: x[1])
-    for criterion, value in sorted_breakdown:
-        lines.append(f"| {criterion} | {value}/2 |")
-    # Show missing criteria as ?
-    all_criteria = ["completeness", "correctness", "sequencing", "risk_awareness", "clarity"]
-    for c in all_criteria:
-        if c not in breakdown:
-            lines.append(f"| {c} | ?/2 |")
-
     # Issues — must fix
     if weaknesses:
         lines.append("")
