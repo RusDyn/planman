@@ -23,9 +23,12 @@ A score of 7+ means the plan is ready to execute. Prefer simple, focused plans �
 """
 
 DEFAULT_STRESS_TEST_PROMPT = """\
-Review this plan for clarity and completeness. Identify the 1-2 most impactful gaps, \
-ambiguities, or risks. Make targeted improvements to address those specific issues. \
-Keep the plan simple and focused — add only what is essential, not everything possible.\
+Stress-test this plan. Spawn 2-3 research agents to examine it in parallel from \
+different angles (correctness, edge cases, feasibility, current best practices). \
+Have agents use web search to validate approaches and identify known pitfalls. \
+Cross-reference findings — web research may surface false positives or outdated \
+practices, so keep only what's well-supported. Then make targeted fixes to the \
+1-2 most critical weaknesses. Focus on value; don't add complexity for its own sake.\
 """
 
 DEFAULTS = {

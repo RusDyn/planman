@@ -130,11 +130,6 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False, t
         for s in suggestions:
             lines.append(f"- {s}")
 
-    # Call to action
-    lines.append("")
-    lines.append("## What To Do")
-    lines.append("Revise the plan addressing the issues above. Then call ExitPlanMode.")
-
     return "\n".join(lines)
 
 

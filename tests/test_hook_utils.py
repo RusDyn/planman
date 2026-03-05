@@ -319,7 +319,7 @@ class TestFormatFeedback(unittest.TestCase):
         self.assertIn("First-round review", text)
         self.assertIn("8/10", text)
         self.assertIn("## Evaluation Result", text)
-        self.assertIn("## What To Do", text)
+        self.assertNotIn("## What To Do", text)
 
     def test_normal_round_header(self):
         from hook_utils import format_feedback
