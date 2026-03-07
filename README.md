@@ -111,10 +111,10 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 | `custom_rubric` | `PLANMAN_RUBRIC` | *(built-in)* | Custom evaluation rubric |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
 | `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Codex verifies plan against actual source files |
-| `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt (skips Codex on round 1) |
+| `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Stress-test rounds (`false`/`true`/number N) |
 | `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context injected into evaluation prompt |
 
-When `stress_test` is enabled, `max_rounds` is automatically clamped to a minimum of 2.
+`stress_test` accepts `false` (off), `true` (1 round), or a number N (N stress-test rounds). Stress-test rounds skip Codex and auto-reject with the stress-test prompt. Codex evaluation begins at round N+1.
 
 Run `/planman:init` to generate `.claude/planman.jsonc` with all settings and inline documentation.
 

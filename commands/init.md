@@ -33,6 +33,8 @@ content = '''// Planman configuration
   \"threshold\": 7,
   // Evaluation rounds before you decide (1-100)
   \"max_rounds\": 3,
+  // Minimum rounds before a plan can pass (0 = no minimum)
+  \"min_rounds\": 0,
   // Override Codex model (empty = codex default)
   \"model\": \"\",
   // Pass through if Codex fails
@@ -45,7 +47,7 @@ content = '''// Planman configuration
   \"verbose\": false,
   // Codex verifies plan against actual source files
   \"source_verify\": true,
-  // Auto-reject first plan for deep revision (skips Codex on round 1)
+  // Stress-test rounds before Codex evaluation (false=off, true=1, or number N)
   \"stress_test\": false,
   // Project context for the evaluator (e.g. \"Python CLI tool, no web framework\")
   \"context\": \"\",

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from config import Config, DEFAULT_RUBRIC, DEFAULT_STRESS_TEST_PROMPT, DEFAULTS, load_config, _coerce_bool, _coerce_int, _strip_jsonc_comments
+from config import Config, DEFAULT_RUBRIC, DEFAULT_STRESS_TEST_PROMPT, DEFAULTS, load_config, _coerce_bool, _coerce_int, _coerce_stress_test, _strip_jsonc_comments
 
 
 class TestCoerceBool(unittest.TestCase):
@@ -41,6 +41,32 @@ class TestCoerceInt(unittest.TestCase):
 
     def test_none_falls_back(self):
         self.assertEqual(_coerce_int(None, "threshold"), DEFAULTS["threshold"])
+
+
+class TestCoerceStressTest(unittest.TestCase):
+    def test_bool_true(self):
+        self.assertEqual(_coerce_stress_test(True), 1)
+
+    def test_bool_false(self):
+        self.assertEqual(_coerce_stress_test(False), 0)
+
+    def test_int_passthrough(self):
+        self.assertEqual(_coerce_stress_test(3), 3)
+
+    def test_int_negative_clamped(self):
+        self.assertEqual(_coerce_stress_test(-1), 0)
+
+    def test_string_true(self):
+        self.assertEqual(_coerce_stress_test("true"), 1)
+
+    def test_string_false(self):
+        self.assertEqual(_coerce_stress_test("false"), 0)
+
+    def test_string_number(self):
+        self.assertEqual(_coerce_stress_test("5"), 5)
+
+    def test_string_invalid(self):
+        self.assertEqual(_coerce_stress_test("banana"), 0)
 
 
 class TestConfigDefaults(unittest.TestCase):
@@ -347,25 +373,95 @@ class TestStressTestConfig(unittest.TestCase):
 
     def test_stress_test_default_false(self):
         cfg = load_config()
-        self.assertFalse(cfg.stress_test)
+        self.assertEqual(cfg.stress_test, 0)
 
     def test_stress_test_env_override(self):
         os.environ["PLANMAN_STRESS_TEST"] = "true"
         cfg = load_config()
-        self.assertTrue(cfg.stress_test)
+        self.assertEqual(cfg.stress_test, 1)
 
     def test_stress_test_file_config(self):
         os.makedirs(".claude", exist_ok=True)
         with open(".claude/planman.jsonc", "w") as f:
             json.dump({"stress_test": True}, f)
         cfg = load_config()
-        self.assertTrue(cfg.stress_test)
+        self.assertEqual(cfg.stress_test, 1)
+
+    def test_stress_test_numeric_value(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"stress_test": 3}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.stress_test, 3)
+
+    def test_stress_test_env_numeric(self):
+        os.environ["PLANMAN_STRESS_TEST"] = "5"
+        cfg = load_config()
+        self.assertEqual(cfg.stress_test, 5)
+
+    def test_stress_test_negative_clamped(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"stress_test": -2}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.stress_test, 0)
+
+    def test_stress_test_invalid_string_defaults(self):
+        os.environ["PLANMAN_STRESS_TEST"] = "banana"
+        cfg = load_config()
+        self.assertEqual(cfg.stress_test, 0)
 
     def test_stress_test_allows_max_rounds_one(self):
         os.environ["PLANMAN_STRESS_TEST"] = "true"
         os.environ["PLANMAN_MAX_ROUNDS"] = "1"
         cfg = load_config()
         self.assertEqual(cfg.max_rounds, 1)  # no longer clamped to 2
+
+
+class TestMinRoundsConfig(unittest.TestCase):
+    def setUp(self):
+        self._saved = {}
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                self._saved[k] = os.environ.pop(k)
+        self._orig_dir = os.getcwd()
+        self._tmpdir = tempfile.mkdtemp()
+        os.chdir(self._tmpdir)
+
+    def tearDown(self):
+        os.chdir(self._orig_dir)
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                del os.environ[k]
+        os.environ.update(self._saved)
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_min_rounds_default_zero(self):
+        cfg = load_config()
+        self.assertEqual(cfg.min_rounds, 0)
+
+    def test_min_rounds_env_override(self):
+        os.environ["PLANMAN_MIN_ROUNDS"] = "3"
+        cfg = load_config()
+        self.assertEqual(cfg.min_rounds, 3)
+
+    def test_min_rounds_file_config(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"min_rounds": 2}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.min_rounds, 2)
+
+    def test_min_rounds_clamped_low(self):
+        os.environ["PLANMAN_MIN_ROUNDS"] = "-5"
+        cfg = load_config()
+        self.assertEqual(cfg.min_rounds, 0)
+
+    def test_min_rounds_clamped_high(self):
+        os.environ["PLANMAN_MIN_ROUNDS"] = "999"
+        cfg = load_config()
+        self.assertEqual(cfg.min_rounds, 100)
 
 
 class TestAutoAnswerConfig(unittest.TestCase):

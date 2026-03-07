@@ -40,13 +40,14 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 |---------|---------|---------|-------------|
 | `threshold` | `PLANMAN_THRESHOLD` | `7` | Minimum score (1-10) to pass |
 | `max_rounds` | `PLANMAN_MAX_ROUNDS` | `3` | Rounds before you decide |
+| `min_rounds` | `PLANMAN_MIN_ROUNDS` | `0` | Minimum rounds before plan can pass |
 | `model` | `PLANMAN_MODEL` | *(codex default)* | Override Codex model |
 | `fail_open` | `PLANMAN_FAIL_OPEN` | `true` | Pass if Codex fails |
 | `enabled` | `PLANMAN_ENABLED` | `true` | Master switch |
 | `custom_rubric` | `PLANMAN_RUBRIC` | *(built-in)* | Custom evaluation rubric |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
 | `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Codex verifies plan against actual source files |
-| `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Auto-reject first plan with stress-test prompt |
+| `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Stress-test rounds (`false`/`true`/number N) |
 | `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context for evaluator |
 
 ### Quick Start
@@ -64,7 +65,7 @@ Run `/planman:init` to create `.claude/planman.jsonc` with all settings and desc
 }
 ```
 
-When `stress_test` is enabled, `max_rounds` is automatically clamped to a minimum of 2.
+`stress_test` accepts `false` (off), `true` (1 round), or a number N (N stress-test rounds). Stress-test rounds skip Codex and auto-reject with the stress-test prompt. Codex evaluation begins at round N+1.
 
 ## Tips
 

@@ -34,12 +34,13 @@ practices, so keep only what's well-supported. Then make targeted fixes to the \
 DEFAULTS = {
     "threshold": 7,
     "max_rounds": 3,
+    "min_rounds": 0,
     "model": "",
     "fail_open": True,
     "enabled": True,
     "custom_rubric": "",
     "verbose": False,
-    "stress_test": False,
+    "stress_test": 0,
     "context": "",
     "source_verify": True,
     "auto_answer": False,
@@ -70,12 +71,30 @@ def _coerce_int(value, key):
         return DEFAULTS.get(key, 0)
 
 
+def _coerce_stress_test(value, key="stress_test"):
+    """Coerce stress_test: False/false→0, True/true→1, number→int."""
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, int):
+        return max(0, value)
+    s = str(value).lower().strip()
+    if s in _BOOL_TRUTHY:
+        return 1
+    if s in _BOOL_FALSY:
+        return 0
+    try:
+        return max(0, int(s))
+    except (ValueError, TypeError):
+        return DEFAULTS.get(key, 0)
+
+
 class Config:
     """Planman configuration."""
 
     __slots__ = (
         "threshold",
         "max_rounds",
+        "min_rounds",
         "model",
         "fail_open",
         "enabled",
@@ -91,6 +110,7 @@ class Config:
     def __init__(self, **kwargs):
         self.threshold = kwargs.get("threshold", DEFAULTS["threshold"])
         self.max_rounds = kwargs.get("max_rounds", DEFAULTS["max_rounds"])
+        self.min_rounds = kwargs.get("min_rounds", DEFAULTS["min_rounds"])
         self.model = kwargs.get("model", DEFAULTS["model"])
         self.fail_open = kwargs.get("fail_open", DEFAULTS["fail_open"])
         self.enabled = kwargs.get("enabled", DEFAULTS["enabled"])
@@ -137,12 +157,13 @@ def _load_env_overrides():
     env_map = {
         "PLANMAN_THRESHOLD": ("threshold", _coerce_int),
         "PLANMAN_MAX_ROUNDS": ("max_rounds", _coerce_int),
+        "PLANMAN_MIN_ROUNDS": ("min_rounds", _coerce_int),
         "PLANMAN_MODEL": ("model", str),
         "PLANMAN_FAIL_OPEN": ("fail_open", _coerce_bool),
         "PLANMAN_ENABLED": ("enabled", _coerce_bool),
         "PLANMAN_RUBRIC": ("custom_rubric", str),
         "PLANMAN_VERBOSE": ("verbose", _coerce_bool),
-        "PLANMAN_STRESS_TEST": ("stress_test", _coerce_bool),
+        "PLANMAN_STRESS_TEST": ("stress_test", _coerce_stress_test),
         "PLANMAN_CONTEXT": ("context", str),
         "PLANMAN_SOURCE_VERIFY": ("source_verify", _coerce_bool),
         "PLANMAN_AUTO_ANSWER": ("auto_answer", _coerce_bool),
@@ -150,7 +171,7 @@ def _load_env_overrides():
     for env_var, (key, coerce) in env_map.items():
         val = os.environ.get(env_var)
         if val is not None:
-            if coerce in (_coerce_int, _coerce_bool):
+            if coerce in (_coerce_int, _coerce_bool, _coerce_stress_test):
                 overrides[key] = coerce(val, key)
             else:
                 overrides[key] = coerce(val)
@@ -178,14 +199,16 @@ def load_config(cwd=None):
     # Clamp numeric ranges (safe coercion — invalid strings fall back to defaults)
     merged["threshold"] = max(0, min(10, _coerce_int(merged["threshold"], "threshold")))
     merged["max_rounds"] = max(1, min(100, _coerce_int(merged["max_rounds"], "max_rounds")))
+    merged["min_rounds"] = max(0, min(100, _coerce_int(merged["min_rounds"], "min_rounds")))
 
-    # Coerce stress_test to bool
-    merged["stress_test"] = _coerce_bool(merged["stress_test"], "stress_test")
+    # Coerce stress_test to int (False→0, True→1, number→int)
+    merged["stress_test"] = _coerce_stress_test(merged["stress_test"], "stress_test")
 
     # Build Config, mapping custom_rubric to rubric
     return Config(
         threshold=merged["threshold"],
         max_rounds=merged["max_rounds"],
+        min_rounds=merged["min_rounds"],
         model=merged["model"],
         fail_open=merged["fail_open"],
         enabled=merged["enabled"],

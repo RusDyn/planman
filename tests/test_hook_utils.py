@@ -310,6 +310,130 @@ class TestStressTestEvaluation(unittest.TestCase):
         self.assertIn("Max evaluation rounds", r2["system_message"])
 
 
+    @patch("hook_utils.evaluate_plan")
+    def test_stress_test_three_rounds(self, mock_eval):
+        """stress_test=3, max_rounds=5 — rounds 1-3 block without Codex, round 4 uses Codex."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config(stress_test=3, max_rounds=5)
+
+        # Rounds 1-3: stress-test blocks without Codex
+        for i in range(1, 4):
+            r = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+            self.assertEqual(r["action"], "block", f"Round {i} should block")
+            mock_eval.assert_not_called()
+
+        # Round 4: Codex evaluates (first-round mandatory rejection still applies)
+        r4 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        mock_eval.assert_called_once()
+
+    @patch("hook_utils.evaluate_plan")
+    def test_stress_test_round_label(self, mock_eval):
+        """stress_test=2 — system_message shows stress-test round info."""
+        from hook_utils import run_evaluation
+        config = _make_config(stress_test=2, max_rounds=5)
+
+        r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertIn("Stress-test round 1/2", r1["system_message"])
+
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertIn("Stress-test round 2/2", r2["system_message"])
+
+    @patch("hook_utils.evaluate_plan")
+    def test_stress_test_zero_disabled(self, mock_eval):
+        """stress_test=0 — Codex called on round 1 (same as stress_test=False)."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config(stress_test=0)
+
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        mock_eval.assert_called_once()
+
+
+class TestMinRoundsEvaluation(unittest.TestCase):
+    """Tests for min_rounds enforcement in run_evaluation()."""
+
+    def setUp(self):
+        self._session_id = f"test-minrounds-{os.getpid()}-{id(self)}"
+
+    def tearDown(self):
+        clear_state(self._session_id)
+
+    @patch("hook_utils.evaluate_plan")
+    def test_min_rounds_blocks_even_high_score(self, mock_eval):
+        """min_rounds=3, round 2, score=8 → BLOCK with 'min rounds' in reason."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config(min_rounds=3)
+
+        # Round 1: mandatory first-round rejection
+        r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r1["action"], "block")
+
+        # Round 2: score=8 >= threshold=7, but min_rounds=3 not reached
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "block")
+        self.assertIn("Min rounds", r2["reason"])
+
+    @patch("hook_utils.evaluate_plan")
+    def test_min_rounds_passes_at_min_round(self, mock_eval):
+        """min_rounds=2, round 2, score=8 → PASS (round == min_rounds, not <)."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config(min_rounds=2)
+
+        # Round 1: mandatory rejection
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+
+        # Round 2: round_count=2 == min_rounds=2, not < → passes
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "pass")
+
+    @patch("hook_utils.evaluate_plan")
+    def test_min_rounds_zero_no_effect(self, mock_eval):
+        """min_rounds=0, round 2, score=8 → PASS (backward compat)."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config(min_rounds=0)
+
+        # Round 1: mandatory rejection
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+
+        # Round 2: passes normally
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "pass")
+
+    @patch("hook_utils.evaluate_plan")
+    def test_min_rounds_vs_max_rounds(self, mock_eval):
+        """max_rounds=2, min_rounds=5, round 3 → PASS (max_rounds wins)."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (LOW_SCORE_RESULT, None)
+        config = _make_config(max_rounds=2, min_rounds=5)
+
+        # Round 1: mandatory rejection
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        # Round 2: score=4 < threshold=7, but also round < min_rounds → block
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        # Round 3: exceeds max_rounds → PASS (max_rounds wins over min_rounds)
+        r3 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r3["action"], "pass")
+        self.assertIn("Max evaluation rounds", r3["system_message"])
+
+    @patch("hook_utils.evaluate_plan")
+    def test_min_rounds_feedback_shows_remaining(self, mock_eval):
+        """Verify 'min rounds' text appears in rejection reason."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config(min_rounds=4)
+
+        # Round 1: mandatory rejection
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        # Round 2: min_rounds=4, round=2, remaining=2
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "block")
+        self.assertIn("2 more round(s) required", r2["reason"])
+
+
 class TestFormatFeedback(unittest.TestCase):
     """Test format_feedback structured format."""
 

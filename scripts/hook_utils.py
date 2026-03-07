@@ -84,7 +84,8 @@ def format_trend(history, current_score):
     return f"- **Previous**: {prev_score}/10 → {current_score}/10 ({sign}{delta})"
 
 
-def format_feedback(data, threshold, round_num, max_rounds, first_round=False, trend=""):
+def format_feedback(data, threshold, round_num, max_rounds, first_round=False, trend="",
+                     min_rounds_remaining=None):
     """Format evaluation result into structured, actionable feedback.
 
     Args:
@@ -94,6 +95,7 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False, t
         max_rounds: Maximum evaluation rounds.
         first_round: Whether this is the first round (mandatory rejection).
         trend: Trend line string from format_trend() (empty on round 1).
+        min_rounds_remaining: If set, number of rounds still required before plan can pass.
     """
     score = data.get("score", "?")
     breakdown = data.get("breakdown") or {}
@@ -115,6 +117,8 @@ def format_feedback(data, threshold, round_num, max_rounds, first_round=False, t
         )
     if trend:
         lines.append(trend)
+    if min_rounds_remaining:
+        lines.append(f"- **Min rounds**: {min_rounds_remaining} more round(s) required before plan can pass")
 
     # Issues — must fix
     if weaknesses:
@@ -189,22 +193,23 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
             ),
         }
 
-    # Stress-test mode: skip Codex on round 1, block with prompt as reason.
-    # Round 2+ continues with normal Codex evaluation.
-    if config.stress_test and state["round_count"] == 1:
+    # Stress-test mode: skip Codex for the first N rounds, block with prompt as reason.
+    # Round N+1 continues with normal Codex evaluation.
+    if config.stress_test and state["round_count"] <= config.stress_test:
         prompt = config.stress_test_prompt
         state = record_feedback(state, None, prompt, None)
         try:
             save_state(state)
         except (OSError, ValueError) as e:
             log(f"failed to save state: {e}", config, cwd)
-        log("stress-test mode: first plan rejected without evaluation", config, cwd)
+        log(f"stress-test mode: round {state['round_count']}/{config.stress_test} rejected without evaluation", config, cwd)
         return {
             "action": "block",
             "reason": prompt,
             "system_message": (
-                f"Planman: Stress-test mode — first plan rejected for deep revision. "
-                f"Round 1/{config.max_rounds}."
+                f"Planman: Stress-test mode — plan rejected for deep revision. "
+                f"Stress-test round {state['round_count']}/{config.stress_test} | "
+                f"Round {state['round_count']}/{config.max_rounds}."
             ),
         }
 
@@ -264,6 +269,24 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
             "reason": feedback_text,
             "system_message": sys_msg,
         }
+
+    # Min rounds enforcement: block even if score would pass
+    if config.min_rounds and state["round_count"] < config.min_rounds:
+        feedback_text = format_feedback(
+            result, config.threshold, state["round_count"], config.max_rounds,
+            trend=trend, min_rounds_remaining=config.min_rounds - state["round_count"],
+        )
+        sys_msg = truncate_for_system_message(
+            assessment_score, state["round_count"], config.max_rounds,
+            trend, weaknesses, suggestions, strengths,
+        )
+        state = record_feedback(state, assessment_score, feedback_text, result.get("breakdown"))
+        try:
+            save_state(state)
+        except OSError as e:
+            log(f"failed to save state: {e}", config, cwd)
+        log(f"min rounds: {state['round_count']}/{config.min_rounds} — blocking", config, cwd)
+        return {"action": "block", "reason": feedback_text, "system_message": sys_msg}
 
     if assessment_score >= config.threshold:
         # Plan passes (round >= 2) — preserve state but null feedback

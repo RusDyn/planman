@@ -24,6 +24,7 @@ Run these commands and report the results:
    print(f'enabled:    {c.enabled}')
    print(f'threshold:  {c.threshold}/10')
    print(f'max_rounds: {c.max_rounds}')
+   print(f'min_rounds: {c.min_rounds}')
    print(f'model:      {c.model or \"(codex default)\"}')
    print(f'fail_open:  {c.fail_open}')
    print(f'verbose:    {c.verbose}')
