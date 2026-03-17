@@ -232,6 +232,30 @@ echo '{"tool_name":"Write","tool_input":{"file_path":"/home/user/.claude/plans/t
 
 Replace `/path/to/planman` with the installed plugin path (check `/hooks` output for the exact location).
 
+## SWE-bench Verified Results
+
+**374 / 500 resolved (74.8%)** on [SWE-bench Verified](https://www.swebench.com/), pass@1.
+
+| Condition | Resolved | Rate | Cost/task | Description |
+|-----------|----------|------|-----------|-------------|
+| Claude Code + planman | 374/500 | **74.8%** | $1.10 | Plan phase + stress-test critique |
+
+Total cost: ~$552 for 500 tasks. Single attempt per task (pass@1), no retries.
+
+### Pilot comparison (50 tasks)
+
+All three conditions run on the same 50-task subset for a controlled comparison:
+
+| Condition | Resolved | Rate | Cost/task | Description |
+|-----------|----------|------|-----------|-------------|
+| Claude Code (baseline) | 35/50 | 70.0% | $0.54 | No plan phase |
+| Claude Code + plan mode | 35/50 | 70.0% | $0.70 | Plan phase, no plugin |
+| Claude Code + planman | 37/50 | **74.0%** | $1.23 | Plan phase + stress-test critique |
+
+Plan mode alone has zero effect — the improvement comes from planman's stress-test self-critique forcing Claude to revise its plan before implementing.
+
+Methodology and raw data: [`benchmark/swebench/`](benchmark/swebench/)
+
 ## Testing
 
 ```bash
