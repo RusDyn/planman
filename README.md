@@ -238,9 +238,10 @@ Replace `/path/to/planman` with the installed plugin path (check `/hooks` output
 
 | Condition | Resolved | Rate | Cost/task | Description |
 |-----------|----------|------|-----------|-------------|
+| Claude Code (baseline) | 300/500 | 60.0% | $0.54 | No plan phase |
 | Claude Code + planman | 374/500 | **74.8%** | $1.10 | Plan phase + stress-test critique |
 
-Total cost: ~$552 for 500 tasks. Single attempt per task (pass@1), no retries.
+Total cost: ~$552 for 500 tasks (planman). Single attempt per task (pass@1), no retries.
 
 ### Pilot comparison (50 tasks)
 
