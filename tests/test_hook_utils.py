@@ -114,7 +114,7 @@ class TestRunEvaluation(unittest.TestCase):
 
     @patch("hook_utils.evaluate_plan")
     def test_max_rounds_passes_through(self, mock_eval):
-        """Exceeding max rounds → pass through + system message informs user."""
+        """Exceeding max rounds → pass through + state reset for next cycle."""
         from hook_utils import run_evaluation
         mock_eval.return_value = (LOW_SCORE_RESULT, None)
         config = _make_config(max_rounds=1)
@@ -128,14 +128,14 @@ class TestRunEvaluation(unittest.TestCase):
         self.assertIn("threshold", r2["system_message"])
         self.assertIsNone(r2["reason"])
 
-        # Round 3 (retry): should still pass through
+        # Round 3 (retry): plan_approved flag resets to round 1 (fresh cycle)
         r3 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
-        self.assertEqual(r3["action"], "pass")
-        self.assertIn("Max evaluation rounds", r3["system_message"])
+        self.assertEqual(r3["action"], "block")
+        self.assertIn("First-round", r3["reason"])
 
     @patch("hook_utils.evaluate_plan")
-    def test_round_continues_after_pass(self, mock_eval):
-        """After plan passes on round 2, round 3 is NOT reset to 1."""
+    def test_round_resets_after_pass(self, mock_eval):
+        """After plan passes on round 2, next eval resets to round 1 (plan_approved flag)."""
         from hook_utils import run_evaluation
         mock_eval.return_value = (VALID_RESULT, None)
         config = _make_config()
@@ -146,9 +146,10 @@ class TestRunEvaluation(unittest.TestCase):
         r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
         self.assertEqual(r2["action"], "pass")   # Round 2: pass
 
+        # Next eval starts fresh cycle (plan_approved flag consumed)
         r3 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
-        self.assertEqual(r3["action"], "pass")   # Round 3: still passes (NOT first-round)
-        self.assertNotIn("First-round", r3.get("reason") or "")
+        self.assertEqual(r3["action"], "block")  # Round 1 again: mandatory first-round
+        self.assertIn("First-round", r3["reason"])
 
     @patch("hook_utils.evaluate_plan")
     def test_pass_clears_feedback_not_state(self, mock_eval):
@@ -862,6 +863,96 @@ class TestNormalizePath(unittest.TestCase):
 
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestPostApprovalReset(unittest.TestCase):
+    """Integration tests: full plan cycle with PostToolUse state clearing."""
+
+    def setUp(self):
+        self._session_id = f"test-reset-{os.getpid()}-{id(self)}"
+
+    def tearDown(self):
+        clear_state(self._session_id)
+
+    @patch("hook_utils.evaluate_plan")
+    def test_full_cycle_with_post_exit_clear(self, mock_eval):
+        """round 1 (block) → round 2 (pass) → PostToolUse clears → round 1 (fresh)."""
+        from hook_utils import run_evaluation
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config()
+
+        # Plan A: round 1 (block), round 2 (pass)
+        r1 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/plan.md")
+        self.assertEqual(r1["action"], "block")
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/plan.md")
+        self.assertEqual(r2["action"], "pass")
+
+        # Simulate PostToolUse(ExitPlanMode) clearing state
+        clear_state(self._session_id)
+
+        # Plan B (same file): fresh round 1
+        r3 = run_evaluation("# New Plan\n1. Different", self._session_id, config, plan_path="/plan.md")
+        self.assertEqual(r3["action"], "block")
+        self.assertIn("First-round", r3["reason"])
+
+    @patch("hook_utils.evaluate_plan")
+    def test_same_path_resets_via_flag_fallback(self, mock_eval):
+        """When PostToolUse doesn't fire (clear context), flag fallback resets rounds."""
+        from hook_utils import run_evaluation
+        from state import load_state
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config()
+
+        # Plan A: round 1 (block), round 2 (pass sets plan_approved flag)
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/plan.md")
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/plan.md")
+        self.assertEqual(r2["action"], "pass")
+
+        # Verify flag was set
+        state = load_state(self._session_id)
+        self.assertTrue(state.get("plan_approved"))
+
+        # NO PostToolUse clear — simulating clear context case
+        # Plan B at same path: flag consumed, round resets to 1
+        r3 = run_evaluation("# New Plan\n1. Different", self._session_id, config, plan_path="/plan.md")
+        self.assertEqual(r3["action"], "block")
+        self.assertIn("First-round", r3["reason"])
+
+    @patch("hook_utils.evaluate_plan")
+    def test_max_rounds_sets_flag(self, mock_eval):
+        """Max rounds pass also sets plan_approved flag."""
+        from hook_utils import run_evaluation
+        from state import load_state
+        mock_eval.return_value = (LOW_SCORE_RESULT, None)
+        config = _make_config(max_rounds=1)
+
+        # Round 1: mandatory rejection
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        # Round 2: over limit → pass
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "pass")
+
+        state = load_state(self._session_id)
+        self.assertTrue(state.get("plan_approved"))
+
+    @patch("hook_utils.evaluate_plan")
+    def test_fail_open_sets_flag(self, mock_eval):
+        """Fail-open pass also sets plan_approved flag."""
+        from hook_utils import run_evaluation
+        from state import load_state
+        mock_eval.return_value = (VALID_RESULT, None)
+        config = _make_config(fail_open=True)
+
+        # Round 1: normal eval (block)
+        run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+
+        # Round 2: error with fail-open → pass
+        mock_eval.return_value = (None, "codex timed out")
+        r2 = run_evaluation(PLAN_TEXT, self._session_id, config, plan_path="/test.md")
+        self.assertEqual(r2["action"], "pass")
+
+        state = load_state(self._session_id)
+        self.assertTrue(state.get("plan_approved"))
 
 
 if __name__ == "__main__":

@@ -86,21 +86,29 @@ def update_for_plan(state, plan_text, plan_path=None):
     """Update state for a new plan evaluation.
 
     Resets round counter when:
+    - plan_approved flag is set (previous plan was approved)
     - plan_path differs from stored path (new plan file)
     Otherwise increments.
     """
     new_hash = compute_plan_hash(plan_text)
-
     normalized_plan_path = _normalize(plan_path) if plan_path else None
-    stored_path = _normalize(state.get("plan_file_path")) if state.get("plan_file_path") else None
 
-    if normalized_plan_path and normalized_plan_path != stored_path:
-        # New plan file (or first file) = new plan
+    # Fallback reset: previous plan was approved but PostToolUse didn't fire
+    # (e.g. user accepted with "clear context"). Consume the flag.
+    if state.get("plan_approved"):
         state["round_count"] = 1
         state["history"] = []
+        state.pop("plan_approved", None)
     else:
-        # Same file = revision
-        state["round_count"] = state.get("round_count", 0) + 1
+        stored_path = _normalize(state.get("plan_file_path")) if state.get("plan_file_path") else None
+
+        if normalized_plan_path and normalized_plan_path != stored_path:
+            # New plan file (or first file) = new plan
+            state["round_count"] = 1
+            state["history"] = []
+        else:
+            # Same file = revision
+            state["round_count"] = state.get("round_count", 0) + 1
 
     state["plan_hash"] = new_hash
     state["last_eval_time"] = time.time()

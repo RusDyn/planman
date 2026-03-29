@@ -174,6 +174,7 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     # Check round limit — pass through with clear proceed signal
     if state["round_count"] > config.max_rounds:
         log("max rounds exceeded — auto-approving", config, cwd)
+        state["plan_approved"] = True
         try:
             save_state(state)
         except (OSError, ValueError) as e:
@@ -221,19 +222,24 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
 
     if error:
         log(f"evaluation error: {error}", config, cwd)
-        # Persist state so round_count advances (prevents infinite retry loops)
-        try:
-            save_state(state)
-        except (OSError, ValueError) as e:
-            log(f"failed to save state: {e}", config, cwd)
         error_brief = error[:500] if len(error) > 500 else error
         if config.fail_open:
+            state["plan_approved"] = True
+            try:
+                save_state(state)
+            except (OSError, ValueError) as e:
+                log(f"failed to save state: {e}", config, cwd)
             return {
                 "action": "pass",
                 "reason": None,
                 "system_message": f"Planman: Evaluation failed ({error_brief}). Passing through (fail-open).",
             }
         else:
+            # Persist state so round_count advances (prevents infinite retry loops)
+            try:
+                save_state(state)
+            except (OSError, ValueError) as e:
+                log(f"failed to save state: {e}", config, cwd)
             return {
                 "action": "block",
                 "reason": f"Planman evaluation failed: {error_brief}. Set PLANMAN_FAIL_OPEN=true to pass through on errors.",
@@ -291,6 +297,7 @@ def run_evaluation(plan_text, session_id, config, cwd=None, plan_path=None):
     if assessment_score >= config.threshold:
         # Plan passes (round >= 2) — preserve state but null feedback
         state = record_feedback(state, assessment_score, None, result.get("breakdown"))
+        state["plan_approved"] = True
         try:
             save_state(state)
         except OSError as e:
