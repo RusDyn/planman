@@ -11,8 +11,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from config import Config
-from hook_utils import MARKER_TEMPLATE, safe_session_id
-from pre_exit_plan_hook import _find_plan_file, _is_plan_filename
+from hook_utils import MARKER_TEMPLATE, find_plan_file as _find_plan_file, is_plan_filename as _is_plan_filename, safe_session_id
 
 
 def _make_config(**overrides):

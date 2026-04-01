@@ -517,7 +517,7 @@ class TestPlanFileSizeLimit(unittest.TestCase):
         """Plan file > 1MB referenced by marker → returns (None, None, None)."""
         import tempfile as _tmpmod
         import time
-        from pre_exit_plan_hook import _find_plan_file
+        from hook_utils import find_plan_file as _find_plan_file
         from hook_utils import safe_session_id, MARKER_TEMPLATE
 
         session_id = f"test-size-{os.getpid()}"
@@ -553,7 +553,7 @@ class TestPlanFileSizeLimit(unittest.TestCase):
         """Plan file under 1MB → returns content."""
         import tempfile as _tmpmod
         import time
-        from pre_exit_plan_hook import _find_plan_file
+        from hook_utils import find_plan_file as _find_plan_file
         from hook_utils import safe_session_id, MARKER_TEMPLATE
 
         session_id = f"test-size-ok-{os.getpid()}"

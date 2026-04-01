@@ -52,7 +52,15 @@ content = '''// Planman configuration
   // Project context for the evaluator (e.g. \"Python CLI tool, no web framework\")
   \"context\": \"\",
   // Auto-answer obvious clarifying questions from project files (experimental)
-  \"auto_answer\": false
+  \"auto_answer\": false,
+  // Additional plan directories to monitor (e.g., [\".omc/plans\"])
+  \"plan_dirs\": [],
+  // Bash command regex patterns that trigger plan evaluation before execution
+  // (e.g., [\"omc\\\\s+(team|ralphthon)\"] for oh-my-claudecode team mode)
+  \"exec_patterns\": [],
+  // Skill name regex patterns that trigger plan evaluation
+  // (e.g., [\"oh-my-claudecode:(ralph|autopilot)\"] for OMC skill invocations)
+  \"skill_patterns\": []
 }
 '''
 

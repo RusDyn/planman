@@ -49,6 +49,9 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 | `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Codex verifies plan against actual source files |
 | `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Stress-test rounds (`false`/`true`/number N) |
 | `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context for evaluator |
+| `plan_dirs` | `PLANMAN_PLAN_DIRS` | `[]` | Additional plan directories to monitor |
+| `exec_patterns` | `PLANMAN_EXEC_PATTERNS` | `[]` | Bash command regex patterns that trigger evaluation |
+| `skill_patterns` | `PLANMAN_SKILL_PATTERNS` | `[]` | Skill name regex patterns that trigger evaluation |
 
 ### Quick Start
 
@@ -73,6 +76,28 @@ Run `/planman:init` to create `.claude/planman.jsonc` with all settings and desc
 - Set `PLANMAN_THRESHOLD=1` to always pass (testing)
 - Set `PLANMAN_MAX_ROUNDS=1` to get just one round of feedback
 - Set `PLANMAN_VERBOSE=true` to see detailed debug output
+
+## Third-Party Plugin Support (e.g., OMC)
+
+Planman can gate execution for third-party planning tools like [oh-my-claudecode](https://github.com/yeachan-heo/oh-my-claudecode) that write plans to custom directories and launch execution via Bash commands or Skill invocations.
+
+### OMC Configuration Example
+
+```jsonc
+{
+  "plan_dirs": [".omc/plans"],
+  "exec_patterns": ["omc\\s+(team|ralphthon)"],
+  "skill_patterns": ["oh-my-claudecode:(ralph|autopilot|ultrawork|ralplan)"]
+}
+```
+
+- `plan_dirs`: Directories to monitor for plan files (in addition to `.claude/plans/`)
+- `exec_patterns`: Regex patterns matching Bash commands that should trigger plan evaluation before execution
+- `skill_patterns`: Regex patterns matching Skill names that should trigger plan evaluation
+
+**Limitation**: OMC's keyword-triggered execution (typing "ralph" without `/` prefix) bypasses tool-level hooks and cannot be automatically gated. Use `/ralph` (Skill invocation) for gated execution.
+
+Env vars accept comma-separated values or JSON arrays: `PLANMAN_EXEC_PATTERNS='["pat1","pat2"]'`
 
 ## Commands
 

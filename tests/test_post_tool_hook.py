@@ -189,5 +189,107 @@ class TestPostToolHookIntegration(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 0)
 
 
+class TestPlanDirsTracking(unittest.TestCase):
+    """Tests for plan_dirs tracking in PostToolUse hook."""
+
+    def setUp(self):
+        self._session_id = f"test-pth-dirs-{os.getpid()}-{id(self)}"
+        self._env_saved = {}
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                self._env_saved[k] = os.environ.pop(k)
+        os.environ["PLANMAN_ENABLED"] = "true"
+        os.environ["PLANMAN_VERBOSE"] = "false"
+        self._marker_path = os.path.join(tempfile.gettempdir(), f"planman-plan-{self._session_id}.json")
+        self._cleanup_marker()
+
+    def tearDown(self):
+        self._cleanup_marker()
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                del os.environ[k]
+        os.environ.update(self._env_saved)
+
+    def _cleanup_marker(self):
+        try:
+            os.unlink(self._marker_path)
+        except OSError:
+            pass
+
+    def _run_hook(self, hook_input):
+        import post_tool_hook
+        stdin_data = json.dumps(hook_input)
+        stdout_capture = StringIO()
+        with patch("sys.stdin", StringIO(stdin_data)), \
+             patch("sys.stdout", stdout_capture), \
+             self.assertRaises(SystemExit) as ctx:
+            post_tool_hook.main()
+        output = stdout_capture.getvalue()
+        exit_code = ctx.exception.code
+        return output, exit_code
+
+    def test_omc_plan_tracked_with_plan_dirs(self):
+        """Write to .omc/plans/ with plan_dirs configured should record marker."""
+        os.environ["PLANMAN_PLAN_DIRS"] = ".omc/plans"
+        output, code = self._run_hook({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/home/user/project/.omc/plans/prd.md", "content": "# Plan"},
+            "session_id": self._session_id,
+            "cwd": "/home/user/project",
+        })
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(self._marker_path))
+
+    def test_omc_plan_injects_advisory_feedback(self):
+        """Write to .omc/plans/ should inject stress-test review via systemMessage."""
+        os.environ["PLANMAN_PLAN_DIRS"] = ".omc/plans"
+        output, code = self._run_hook({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/home/user/project/.omc/plans/prd.md", "content": "# Plan"},
+            "session_id": self._session_id,
+            "cwd": "/home/user/project",
+        })
+        self.assertEqual(code, 0)
+        # Should output systemMessage with review prompt
+        self.assertTrue(output.strip())
+        parsed = json.loads(output)
+        self.assertIn("systemMessage", parsed)
+        self.assertIn("Planman", parsed["systemMessage"])
+        self.assertIn("Stress-test", parsed["systemMessage"])
+
+    def test_native_plan_no_advisory(self):
+        """Write to .claude/plans/ should NOT inject advisory (handled by ExitPlanMode)."""
+        output, code = self._run_hook({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/home/user/.claude/plans/plan.md", "content": "# Plan"},
+            "session_id": self._session_id,
+        })
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "")  # No systemMessage for native plans
+
+    def test_omc_plan_not_tracked_without_plan_dirs(self):
+        """Write to .omc/plans/ without plan_dirs should NOT record marker."""
+        _, code = self._run_hook({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/home/user/project/.omc/plans/prd.md", "content": "# Plan"},
+            "session_id": self._session_id,
+            "cwd": "/home/user/project",
+        })
+        self.assertEqual(code, 0)
+        self.assertFalse(os.path.exists(self._marker_path))
+
+    def test_unrelated_dir_not_tracked_with_plan_dirs(self):
+        """Write to unrelated directory should NOT record marker even with plan_dirs."""
+        os.environ["PLANMAN_PLAN_DIRS"] = ".omc/plans"
+        _, code = self._run_hook({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/home/user/project/src/main.ts", "content": "code"},
+            "session_id": self._session_id,
+            "cwd": "/home/user/project",
+        })
+        self.assertEqual(code, 0)
+        self.assertFalse(os.path.exists(self._marker_path))
+
+
 if __name__ == "__main__":
     unittest.main()

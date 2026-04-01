@@ -18,8 +18,11 @@ try:
 except ImportError:
     fcntl = None
 
+import glob
+
 from config import load_config
 from evaluator import check_codex_installed, evaluate_plan
+from path_utils import normalize_path
 from state import (
     compute_plan_hash,
     load_state,
@@ -66,6 +69,176 @@ def log(msg, config, cwd=None):
     _log_to_file(msg, cwd)
     if config and config.verbose:
         print(f"[planman] {msg}", file=sys.stderr)
+
+
+def is_plan_filename(basename):
+    """Return True if basename looks like an actual plan file (not metadata)."""
+    lower = basename.lower()
+    if lower.startswith("."):
+        return False
+    skip_prefixes = ("readme", "template", "sample", "example", "backup")
+    for prefix in skip_prefixes:
+        if lower.startswith(prefix):
+            return False
+    return True
+
+
+def read_plan_text(path):
+    """Read plan file, return (text, skip_reason).
+
+    text is None when the file is empty/oversized/unreadable.
+    skip_reason is set only when the file was found but explicitly rejected.
+    """
+    _MAX_PLAN_SIZE = 1_000_000  # 1 MB
+    try:
+        size = os.path.getsize(path)
+        if size > _MAX_PLAN_SIZE:
+            return None, f"Plan file too large (>{_MAX_PLAN_SIZE // 1_000_000} MB): {path}"
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+        return (text, None) if text.strip() else (None, None)
+    except (OSError, UnicodeDecodeError):
+        return None, None
+
+
+def read_marker_metadata(session_id):
+    """Read marker file and return (normalized_path_or_None, timestamp_float).
+
+    Returns (None, 0) for: missing file, corrupt JSON, missing keys,
+    non-numeric timestamp, future timestamp (clamped to 0).
+    """
+    safe_id = safe_session_id(session_id)
+    marker_path = MARKER_TEMPLATE.format(session_id=safe_id)
+    try:
+        with open(marker_path, "r", encoding="utf-8") as f:
+            marker = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return (None, 0)
+
+    if not isinstance(marker, dict):
+        return (None, 0)
+
+    plan_path = marker.get("plan_file_path")
+    if not plan_path or not isinstance(plan_path, str):
+        return (None, 0)
+
+    ts = marker.get("timestamp")
+    if ts is None:
+        return (None, 0)
+    try:
+        ts = float(ts)
+    except (ValueError, TypeError):
+        return (None, 0)
+
+    # Future timestamp → clamp to 0 (marker still trusted if file exists)
+    if ts > time.time():
+        ts = 0
+
+    return (normalize_path(plan_path), ts)
+
+
+def scan_plan_dirs(cwd, plan_dirs=None, project_local_only=False):
+    """Scan plan directories for most recently modified .md plan file.
+
+    Checks {cwd}/.claude/plans/, configured plan_dirs (resolved relative
+    to cwd), and optionally ~/.claude/plans/.
+    Returns the path of the best candidate or None.
+    """
+    home_plans = os.path.expanduser("~/.claude/plans")
+    cwd_plans = os.path.join(cwd, ".claude", "plans") if cwd else None
+
+    scan_dirs_list = []
+    if cwd_plans and os.path.isdir(cwd_plans):
+        scan_dirs_list.append(cwd_plans)
+
+    # Additional plan_dirs (resolved relative to cwd)
+    if plan_dirs and cwd:
+        for d in plan_dirs:
+            resolved = os.path.join(cwd, d) if not os.path.isabs(d) else d
+            resolved = os.path.realpath(resolved)
+            if os.path.isdir(resolved) and resolved not in scan_dirs_list:
+                scan_dirs_list.append(resolved)
+
+    if not project_local_only:
+        if os.path.isdir(home_plans):
+            real_home = os.path.realpath(home_plans)
+            if real_home not in [os.path.realpath(d) for d in scan_dirs_list]:
+                scan_dirs_list.append(home_plans)
+
+    md_files = []
+    for plans_dir in scan_dirs_list:
+        for f in glob.glob(os.path.join(plans_dir, "*.md")):
+            if is_plan_filename(os.path.basename(f)):
+                md_files.append(f)
+
+    if not md_files:
+        return None
+
+    return max(md_files, key=os.path.getmtime)
+
+
+def find_plan_file(session_id, cwd, config):
+    """Find the plan file path via session marker or fallback scan.
+
+    Returns (plan_file_path, plan_text, skip_reason) where skip_reason
+    is a human-readable message when the plan was found but rejected
+    (e.g. oversized), or None on success / when no plan exists at all.
+    """
+    _MARKER_TTL = 7200  # 2 hours
+    _STALENESS_TOLERANCE = 2  # seconds
+
+    plan_dirs = getattr(config, "plan_dirs", None)
+
+    # ── Gate: debug marker-only mode (internal escape hatch) ──
+    if os.environ.get("_PLANMAN_DEBUG_MARKER_ONLY"):
+        marker_path, _ = read_marker_metadata(session_id)
+        if marker_path and os.path.isfile(marker_path):
+            text, skip = read_plan_text(marker_path)
+            if text:
+                return (marker_path, text, None)
+            return (None, None, skip)
+        return (None, None, None)
+
+    # ── Step 1: Try marker (authoritative when fresh) ──
+    marker_plan_path, marker_ts = read_marker_metadata(session_id)
+    now = time.time()
+    expired = marker_ts > 0 and (now - marker_ts) > (_MARKER_TTL + _STALENESS_TOLERANCE)
+
+    if marker_plan_path and os.path.isfile(marker_plan_path) and not expired:
+        text, skip = read_plan_text(marker_plan_path)
+        if text:
+            log(
+                f"plan detection: source=marker, path={marker_plan_path}, "
+                f"session={safe_session_id(session_id)}",
+                config, cwd,
+            )
+            return (marker_plan_path, text, None)
+        if skip:
+            return (None, None, skip)
+
+    # ── Step 2: Scan fallback (marker missing/expired/file deleted) ──
+    scan_path = scan_plan_dirs(cwd, plan_dirs=plan_dirs, project_local_only=True)
+    if not scan_path:
+        scan_path = scan_plan_dirs(cwd, plan_dirs=plan_dirs, project_local_only=False)
+
+    reason = (
+        "marker_expired" if expired
+        else "marker_file_deleted" if marker_plan_path
+        else "no_marker"
+    )
+    if scan_path:
+        text, skip = read_plan_text(scan_path)
+        if text:
+            log(
+                f"plan detection: source=scan_fallback({reason}), "
+                f"path={scan_path}, session={safe_session_id(session_id)}",
+                config, cwd,
+            )
+            return (scan_path, text, None)
+        if skip:
+            return (None, None, skip)
+
+    return (None, None, None)
 
 
 def format_trend(history, current_score):

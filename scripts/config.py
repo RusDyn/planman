@@ -45,6 +45,9 @@ DEFAULTS = {
     "source_verify": True,
     "auto_answer": False,
     "stress_test_prompt": "",
+    "plan_dirs": [],
+    "exec_patterns": [],
+    "skill_patterns": [],
 }
 
 _BOOL_TRUTHY = {"true", "1", "yes", "on"}
@@ -88,6 +91,27 @@ def _coerce_stress_test(value, key="stress_test"):
         return DEFAULTS.get(key, 0)
 
 
+def _coerce_list(value, key):
+    """Coerce to list[str]. Accepts JSON arrays, comma-separated strings."""
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return []
+        # Try JSON array first (handles commas in regex patterns)
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            except (json.JSONDecodeError, ValueError):
+                pass
+        # Fall back to comma-separated
+        return [item.strip() for item in s.split(",") if item.strip()]
+    return DEFAULTS.get(key, [])
+
+
 class Config:
     """Planman configuration."""
 
@@ -105,6 +129,9 @@ class Config:
         "source_verify",
         "auto_answer",
         "stress_test_prompt",
+        "plan_dirs",
+        "exec_patterns",
+        "skill_patterns",
     )
 
     def __init__(self, **kwargs):
@@ -121,6 +148,9 @@ class Config:
         self.source_verify = kwargs.get("source_verify", DEFAULTS["source_verify"])
         self.auto_answer = kwargs.get("auto_answer", DEFAULTS["auto_answer"])
         self.stress_test_prompt = kwargs.get("stress_test_prompt", "") or DEFAULT_STRESS_TEST_PROMPT
+        self.plan_dirs = kwargs.get("plan_dirs", DEFAULTS["plan_dirs"])
+        self.exec_patterns = kwargs.get("exec_patterns", DEFAULTS["exec_patterns"])
+        self.skill_patterns = kwargs.get("skill_patterns", DEFAULTS["skill_patterns"])
 
 
 def _strip_jsonc_comments(text):
@@ -167,11 +197,14 @@ def _load_env_overrides():
         "PLANMAN_CONTEXT": ("context", str),
         "PLANMAN_SOURCE_VERIFY": ("source_verify", _coerce_bool),
         "PLANMAN_AUTO_ANSWER": ("auto_answer", _coerce_bool),
+        "PLANMAN_PLAN_DIRS": ("plan_dirs", _coerce_list),
+        "PLANMAN_EXEC_PATTERNS": ("exec_patterns", _coerce_list),
+        "PLANMAN_SKILL_PATTERNS": ("skill_patterns", _coerce_list),
     }
     for env_var, (key, coerce) in env_map.items():
         val = os.environ.get(env_var)
         if val is not None:
-            if coerce in (_coerce_int, _coerce_bool, _coerce_stress_test):
+            if coerce in (_coerce_int, _coerce_bool, _coerce_stress_test, _coerce_list):
                 overrides[key] = coerce(val, key)
             else:
                 overrides[key] = coerce(val)
@@ -204,6 +237,11 @@ def load_config(cwd=None):
     # Coerce stress_test to int (False→0, True→1, number→int)
     merged["stress_test"] = _coerce_stress_test(merged["stress_test"], "stress_test")
 
+    # Coerce list fields
+    merged["plan_dirs"] = _coerce_list(merged.get("plan_dirs", []), "plan_dirs")
+    merged["exec_patterns"] = _coerce_list(merged.get("exec_patterns", []), "exec_patterns")
+    merged["skill_patterns"] = _coerce_list(merged.get("skill_patterns", []), "skill_patterns")
+
     # Build Config, mapping custom_rubric to rubric
     return Config(
         threshold=merged["threshold"],
@@ -219,4 +257,7 @@ def load_config(cwd=None):
         source_verify=_coerce_bool(merged.get("source_verify", True), "source_verify"),
         auto_answer=_coerce_bool(merged.get("auto_answer", False), "auto_answer"),
         stress_test_prompt=merged.get("stress_test_prompt", ""),
+        plan_dirs=merged["plan_dirs"],
+        exec_patterns=merged["exec_patterns"],
+        skill_patterns=merged["skill_patterns"],
     )

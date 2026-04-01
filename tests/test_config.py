@@ -509,5 +509,94 @@ class TestAutoAnswerConfig(unittest.TestCase):
             cfg.nonexistent = "oops"
 
 
+class TestListConfig(unittest.TestCase):
+    """Tests for plan_dirs, exec_patterns, skill_patterns list config."""
+
+    def setUp(self):
+        self._saved = {}
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                self._saved[k] = os.environ.pop(k)
+        self._orig_dir = os.getcwd()
+        self._tmpdir = tempfile.mkdtemp()
+        os.chdir(self._tmpdir)
+
+    def tearDown(self):
+        os.chdir(self._orig_dir)
+        for k in list(os.environ):
+            if k.startswith("PLANMAN_"):
+                del os.environ[k]
+        os.environ.update(self._saved)
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_plan_dirs_default_empty(self):
+        cfg = load_config()
+        self.assertEqual(cfg.plan_dirs, [])
+
+    def test_exec_patterns_default_empty(self):
+        cfg = load_config()
+        self.assertEqual(cfg.exec_patterns, [])
+
+    def test_skill_patterns_default_empty(self):
+        cfg = load_config()
+        self.assertEqual(cfg.skill_patterns, [])
+
+    def test_plan_dirs_from_file_config(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"plan_dirs": [".omc/plans", ".other/plans"]}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.plan_dirs, [".omc/plans", ".other/plans"])
+
+    def test_exec_patterns_from_file_config(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"exec_patterns": ["omc\\s+(team|ralphthon)"]}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.exec_patterns, ["omc\\s+(team|ralphthon)"])
+
+    def test_plan_dirs_from_env_comma_separated(self):
+        os.environ["PLANMAN_PLAN_DIRS"] = ".omc/plans,.other/plans"
+        cfg = load_config()
+        self.assertEqual(cfg.plan_dirs, [".omc/plans", ".other/plans"])
+
+    def test_plan_dirs_from_env_json_array(self):
+        os.environ["PLANMAN_PLAN_DIRS"] = '[".omc/plans", ".other/plans"]'
+        cfg = load_config()
+        self.assertEqual(cfg.plan_dirs, [".omc/plans", ".other/plans"])
+
+    def test_exec_patterns_from_env_json_array(self):
+        """JSON array in env var handles commas in regex patterns."""
+        os.environ["PLANMAN_EXEC_PATTERNS"] = '["omc\\\\s+(team|ralphthon)", "other,pattern"]'
+        cfg = load_config()
+        self.assertEqual(len(cfg.exec_patterns), 2)
+        self.assertIn("other,pattern", cfg.exec_patterns)
+
+    def test_env_overrides_file_for_lists(self):
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"plan_dirs": ["from_file"]}, f)
+        os.environ["PLANMAN_PLAN_DIRS"] = "from_env"
+        cfg = load_config()
+        self.assertEqual(cfg.plan_dirs, ["from_env"])
+
+    def test_empty_env_var_yields_empty_list(self):
+        os.environ["PLANMAN_PLAN_DIRS"] = ""
+        cfg = load_config()
+        self.assertEqual(cfg.plan_dirs, [])
+
+    def test_empty_strings_filtered(self):
+        os.environ["PLANMAN_EXEC_PATTERNS"] = "pat1,,pat2,"
+        cfg = load_config()
+        self.assertEqual(cfg.exec_patterns, ["pat1", "pat2"])
+
+    def test_slots_include_list_fields(self):
+        cfg = Config()
+        self.assertEqual(cfg.plan_dirs, [])
+        self.assertEqual(cfg.exec_patterns, [])
+        self.assertEqual(cfg.skill_patterns, [])
+
+
 if __name__ == "__main__":
     unittest.main()
