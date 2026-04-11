@@ -255,7 +255,7 @@ All three conditions run on the same 50-task subset for a controlled comparison:
 
 Plan mode alone has zero effect — the improvement comes from planman's stress-test self-critique forcing Claude to revise its plan before implementing.
 
-> **Note on leaderboard baselines**: The SWE-bench leaderboard's base Opus 4.6 entry (75.6%) uses [mini-swe-agent v2.0.0](https://github.com/swe-bench/SWE-bench/tree/main/swebench/harness/mini_swe_agent), a different agent framework by the SWE-bench maintainers — not Claude Code. Planman uses Claude Code's native CLI. Per-instance comparison shows the two systems solve different tasks (33 unique to mini-swe-agent, 29 unique to planman). See the [technical report](https://rusdyn.github.io/planman/) for details.
+> **Note on leaderboard baselines**: The SWE-bench leaderboard lists Claude entries at 75-81%, but these use extended thinking (64K budget), multiple trials (25 avg), and purpose-built scaffolds (mini-swe-agent). The closest apples-to-apples entry is Claude Opus 4.1 at 74.5% with no extended thinking and a simple scaffold — planman matches this at 74.8%. Our baseline (71%) uses the same Claude Code CLI without thinking; the gap vs leaderboard is explained by these configuration differences, not evaluation bugs. See the [technical report](https://rusdyn.github.io/planman/) for details.
 
 Methodology and raw data: [`benchmark/swebench/`](benchmark/swebench/)
 

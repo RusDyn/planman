@@ -1,8 +1,11 @@
 {
   "name": "planman",
-  "description": "Development marketplace for planman plugin",
   "owner": {
     "name": "rusdyn"
+  },
+  "metadata": {
+    "description": "Evaluates Claude Code plans using OpenAI Codex CLI",
+    "version": "0.4.9"
   },
   "plugins": [
     {

@@ -178,27 +178,30 @@ def load_planman_resolved_list() -> set[str] | None:
 
 
 def build_paired_data(
-    baseline_results: dict[str, bool],
-    stress_test_results: dict[str, bool],
+    control_results: dict[str, bool],
+    treatment_results: dict[str, bool],
 ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, bool]]]:
     """Build per-task and majority-vote dicts for compute_pairwise().
 
     Since we have 1 rep per task, resolve rate = 1.0 or 0.0, and majority vote = resolved.
+
+    Note: dict keys are kept as "stress_test" and "baseline" for compatibility with
+    scorer_swe.compute_pairwise() which hard-codes these key names.
     """
     per_task: dict[str, dict[str, float]] = {}
     majority_votes: dict[str, dict[str, bool]] = {}
 
     # Only include tasks present in BOTH conditions
-    common_tasks = set(baseline_results.keys()) & set(stress_test_results.keys())
+    common_tasks = set(control_results.keys()) & set(treatment_results.keys())
 
     for task in common_tasks:
         per_task[task] = {
-            "stress_test": 1.0 if stress_test_results[task] else 0.0,
-            "baseline": 1.0 if baseline_results[task] else 0.0,
+            "stress_test": 1.0 if treatment_results[task] else 0.0,
+            "baseline": 1.0 if control_results[task] else 0.0,
         }
         majority_votes[task] = {
-            "stress_test": stress_test_results[task],
-            "baseline": baseline_results[task],
+            "stress_test": treatment_results[task],
+            "baseline": control_results[task],
         }
 
     return per_task, majority_votes
@@ -277,7 +280,12 @@ def print_report(
     stress_test_results: dict[str, bool],
     ablation: list[dict],
     mini_swe: dict | None,
+    control_name: str = "baseline",
+    treatment_name: str = "stress_test",
 ):
+    control_label = control_name
+    treatment_label = f"{treatment_name} (planman)" if treatment_name == "stress_test" else treatment_name
+
     print(f"\n{'='*70}")
     print("PLANMAN SWE-BENCH COMPARISON REPORT")
     print(f"{'='*70}")
@@ -294,8 +302,8 @@ def print_report(
     print(f"{'─'*70}")
     print(f"  {'Condition':<25} {'Resolved':>10} {'Total':>8} {'Rate':>8}")
     print(f"  {'─'*55}")
-    print(f"  {'baseline':<25} {sum(v for v in baseline_results.values()):>10} {bl_total:>8} {sum(v for v in baseline_results.values())/bl_total*100:>7.1f}%")
-    print(f"  {'stress_test (planman)':<25} {sum(v for v in stress_test_results.values()):>10} {st_total:>8} {sum(v for v in stress_test_results.values())/st_total*100:>7.1f}%")
+    print(f"  {control_label:<25} {sum(v for v in baseline_results.values()):>10} {bl_total:>8} {sum(v for v in baseline_results.values())/bl_total*100:>7.1f}%")
+    print(f"  {treatment_label:<25} {sum(v for v in stress_test_results.values()):>10} {st_total:>8} {sum(v for v in stress_test_results.values())/st_total*100:>7.1f}%")
 
     # Paired comparison
     if pairwise and len(common) > 0:
@@ -386,6 +394,8 @@ def build_json_report(
     stress_test_results: dict[str, bool],
     ablation: list[dict],
     mini_swe: dict | None,
+    control_name: str = "baseline",
+    treatment_name: str = "stress_test",
 ) -> dict:
     common = set(baseline_results.keys()) & set(stress_test_results.keys())
     st_only = sum(1 for t in common if stress_test_results[t] and not baseline_results[t])
@@ -394,12 +404,12 @@ def build_json_report(
 
     report = {
         "full_run": {
-            "baseline": {
+            control_name: {
                 "resolved": sum(v for v in baseline_results.values()),
                 "total": len(baseline_results),
                 "rate": round(sum(v for v in baseline_results.values()) / len(baseline_results) * 100, 1) if baseline_results else 0,
             },
-            "stress_test": {
+            treatment_name: {
                 "resolved": sum(v for v in stress_test_results.values()),
                 "total": len(stress_test_results),
                 "rate": round(sum(v for v in stress_test_results.values()) / len(stress_test_results) * 100, 1) if stress_test_results else 0,
@@ -429,23 +439,31 @@ def build_json_report(
 def main():
     parser = argparse.ArgumentParser(description="Compare baseline vs stress_test conditions")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--conditions", default="baseline,stress_test",
+                        help="Comma-separated pair: control,treatment (default: baseline,stress_test)")
     parser.add_argument("--mini-swe-agent-dir", type=str, default=None,
                         help="Path to mini-swe-agent evaluation directory")
     args = parser.parse_args()
 
-    # Load full-run eval reports
-    print("Loading baseline evaluation reports...", file=sys.stderr)
-    baseline_results = load_eval_reports_for_condition("baseline")
-    print(f"  Baseline: {sum(v for v in baseline_results.values())}/{len(baseline_results)} resolved", file=sys.stderr)
+    parts = args.conditions.split(",")
+    if len(parts) != 2:
+        print(f"ERROR: --conditions must be a comma-separated pair, got: {args.conditions}", file=sys.stderr)
+        sys.exit(1)
+    control_name, treatment_name = parts[0].strip(), parts[1].strip()
 
-    print("Loading stress_test evaluation reports...", file=sys.stderr)
-    stress_test_results = load_eval_reports_for_condition("stress_test")
-    print(f"  Stress_test: {sum(v for v in stress_test_results.values())}/{len(stress_test_results)} resolved", file=sys.stderr)
+    # Load full-run eval reports
+    print(f"Loading {control_name} evaluation reports...", file=sys.stderr)
+    baseline_results = load_eval_reports_for_condition(control_name)
+    print(f"  {control_name}: {sum(v for v in baseline_results.values())}/{len(baseline_results)} resolved", file=sys.stderr)
+
+    print(f"Loading {treatment_name} evaluation reports...", file=sys.stderr)
+    stress_test_results = load_eval_reports_for_condition(treatment_name)
+    print(f"  {treatment_name}: {sum(v for v in stress_test_results.values())}/{len(stress_test_results)} resolved", file=sys.stderr)
 
     if not baseline_results:
-        print("WARNING: No baseline evaluation reports found. Run the baseline first.", file=sys.stderr)
+        print(f"WARNING: No {control_name} evaluation reports found. Run it first.", file=sys.stderr)
     if not stress_test_results:
-        print("WARNING: No stress_test evaluation reports found.", file=sys.stderr)
+        print(f"WARNING: No {treatment_name} evaluation reports found.", file=sys.stderr)
 
     # Compute paired statistics (only on common tasks)
     pairwise = None
@@ -487,10 +505,12 @@ def main():
         print("WARNING: mini-swe-agent results not found. Skipping comparison.", file=sys.stderr)
 
     if args.json:
-        report = build_json_report(pairwise, baseline_results, stress_test_results, ablation, mini_swe)
+        report = build_json_report(pairwise, baseline_results, stress_test_results, ablation, mini_swe,
+                                   control_name=control_name, treatment_name=treatment_name)
         print(json.dumps(report, indent=2, default=str))
     else:
-        print_report(pairwise, baseline_results, stress_test_results, ablation, mini_swe)
+        print_report(pairwise, baseline_results, stress_test_results, ablation, mini_swe,
+                     control_name=control_name, treatment_name=treatment_name)
 
 
 if __name__ == "__main__":

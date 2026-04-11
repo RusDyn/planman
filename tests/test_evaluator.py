@@ -18,6 +18,8 @@ from evaluator import (
 )
 from config import Config
 
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def _make_config(**overrides):
     defaults = {
@@ -191,6 +193,7 @@ class TestParseCodexOutput(unittest.TestCase):
         self.assertEqual(result["score"], 10)
 
 
+@patch("evaluator.PLUGIN_ROOT", _PROJECT_ROOT)
 class TestEvaluatePlan(unittest.TestCase):
     def setUp(self):
         reset_codex_cache()
@@ -319,6 +322,7 @@ class TestEvaluatePlan(unittest.TestCase):
         self.assertIn("malformed output", error)
 
 
+@patch("evaluator.PLUGIN_ROOT", _PROJECT_ROOT)
 class TestPromptLengthLimit(unittest.TestCase):
     def setUp(self):
         reset_codex_cache()
@@ -468,6 +472,7 @@ class TestExtractCodexError(unittest.TestCase):
         self.assertEqual(result, "no stderr output")
 
 
+@patch("evaluator.PLUGIN_ROOT", _PROJECT_ROOT)
 class TestLongStderrCapture(unittest.TestCase):
     def setUp(self):
         reset_codex_cache()
