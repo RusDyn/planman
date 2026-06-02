@@ -4,13 +4,13 @@
     "name": "rusdyn"
   },
   "metadata": {
-    "description": "Evaluates Claude Code plans using OpenAI Codex CLI",
+    "description": "Evaluates AI coding-agent plans using another agent",
     "version": "0.4.9"
   },
   "plugins": [
     {
       "name": "planman",
-      "description": "Evaluates Claude Code plans using OpenAI Codex CLI",
+      "description": "Evaluates AI coding-agent plans using another agent",
       "version": "0.4.9",
       "source": "./",
       "author": {

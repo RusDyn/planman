@@ -11,9 +11,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from evaluator import (
     _extract_codex_error,
     build_prompt,
+    check_claude_installed,
     check_codex_installed,
+    detect_host,
+    evaluate_plan_claude,
     evaluate_plan,
     parse_codex_output,
+    resolve_evaluator,
+    reset_claude_cache,
     reset_codex_cache,
 )
 from config import Config
@@ -26,6 +31,9 @@ def _make_config(**overrides):
         "threshold": 7,
         "max_rounds": 3,
         "model": "",
+        "evaluator": "auto",
+        "codex_bin": "codex",
+        "claude_bin": "claude",
         "fail_open": True,
         "enabled": True,
         "rubric": "Score it 1-10.",
@@ -192,6 +200,29 @@ class TestParseCodexOutput(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(result["score"], 10)
 
+    def test_claude_wrapped_json_result_accepted(self):
+        stdout = json.dumps({"type": "result", "result": json.dumps(VALID_RESULT)})
+        result, error = parse_codex_output(stdout)
+        self.assertIsNone(error)
+        self.assertEqual(result["score"], 8)
+
+
+class TestEvaluatorRouting(unittest.TestCase):
+    def test_auto_claude_host_uses_codex(self):
+        self.assertEqual(resolve_evaluator(_make_config(), host="claude"), "codex")
+
+    def test_auto_codex_host_uses_claude(self):
+        self.assertEqual(resolve_evaluator(_make_config(), host="codex"), "claude")
+
+    def test_explicit_evaluator_override(self):
+        self.assertEqual(resolve_evaluator(_make_config(evaluator="claude"), host="claude"), "claude")
+
+    def test_detect_host_from_claude_tool(self):
+        self.assertEqual(detect_host({"tool_name": "ExitPlanMode"}), "claude")
+
+    def test_detect_host_from_codex_event(self):
+        self.assertEqual(detect_host({"hookEventName": "Stop"}), "codex")
+
 
 @patch("evaluator.PLUGIN_ROOT", _PROJECT_ROOT)
 class TestEvaluatePlan(unittest.TestCase):
@@ -246,6 +277,22 @@ class TestEvaluatePlan(unittest.TestCase):
         evaluate_plan("My plan", config)
         cmd = mock_run.call_args[0][0]
         self.assertIn("--ephemeral", cmd)
+
+    @patch("evaluator.subprocess.run")
+    @patch("evaluator.check_codex_installed", return_value=True)
+    def test_codex_disables_hooks_and_sets_sentinel(self, mock_check, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(VALID_RESULT),
+            stderr="",
+        )
+        config = _make_config()
+        evaluate_plan("My plan", config)
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("--disable", cmd)
+        self.assertIn("hooks", cmd)
+        env = mock_run.call_args[1]["env"]
+        self.assertEqual(env["_PLANMAN_EVALUATOR"], "1")
 
     @patch("evaluator.subprocess.run")
     @patch("evaluator.check_codex_installed", return_value=True)
@@ -394,6 +441,56 @@ class TestCheckCodexInstalled(unittest.TestCase):
         mock_which.assert_called_once()
 
 
+class TestCheckClaudeInstalled(unittest.TestCase):
+    def setUp(self):
+        reset_claude_cache()
+
+    def tearDown(self):
+        reset_claude_cache()
+
+    @patch("evaluator.shutil.which", return_value="/usr/local/bin/claude")
+    def test_found(self, mock_which):
+        self.assertTrue(check_claude_installed())
+
+    @patch("evaluator.shutil.which", return_value=None)
+    def test_not_found(self, mock_which):
+        self.assertFalse(check_claude_installed())
+
+
+@patch("evaluator.PLUGIN_ROOT", _PROJECT_ROOT)
+class TestEvaluatePlanClaude(unittest.TestCase):
+    def setUp(self):
+        reset_claude_cache()
+
+    def tearDown(self):
+        reset_claude_cache()
+
+    @patch("evaluator.subprocess.run")
+    @patch("evaluator.check_claude_installed", return_value=True)
+    def test_successful_claude_evaluation(self, mock_check, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"result": json.dumps(VALID_RESULT)}),
+            stderr="",
+        )
+        result, error = evaluate_plan_claude("My plan", _make_config(evaluator="claude"))
+        self.assertIsNone(error)
+        self.assertEqual(result["score"], 8)
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("claude", cmd[0])
+        self.assertIn("-p", cmd)
+        self.assertIn("--json-schema", cmd)
+        self.assertIn("--no-session-persistence", cmd)
+        self.assertNotIn("--bare", cmd)
+        self.assertEqual(mock_run.call_args[1]["env"]["_PLANMAN_EVALUATOR"], "1")
+
+    @patch("evaluator.check_claude_installed", return_value=False)
+    def test_claude_not_installed(self, mock_check):
+        result, error = evaluate_plan_claude("My plan", _make_config(evaluator="claude"))
+        self.assertIsNone(result)
+        self.assertIn("claude CLI not found", error)
+
+
 class TestPluginRoot(unittest.TestCase):
     def test_empty_plugin_root_uses_file_based_fallback(self):
         """When CLAUDE_PLUGIN_ROOT is empty string, should use file-based fallback."""
@@ -428,7 +525,7 @@ class TestMissingSchema(unittest.TestCase):
         result, error = evaluate_plan("My plan", config)
         self.assertIsNone(result)
         self.assertIn("schema file not found", error)
-        self.assertIn("CLAUDE_PLUGIN_ROOT", error)
+        self.assertIn("plugin root", error)
 
 
 class TestExtractCodexError(unittest.TestCase):

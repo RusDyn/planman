@@ -7,16 +7,16 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python 3.8+">
-  <img src="https://img.shields.io/badge/claude--code-plugin-blueviolet.svg" alt="Claude Code Plugin">
+  <img src="https://img.shields.io/badge/claude--code%20%2B%20codex-plugin-blueviolet.svg" alt="Claude Code and Codex Plugin">
 </p>
 
-A quality gate for AI-generated plans. This [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin sends implementation plans to [OpenAI Codex CLI](https://github.com/openai/codex) for independent scoring, automatically rejecting low-quality plans with actionable feedback — so Claude iterates before you review.
+A quality gate for AI-generated plans. This plugin evaluates implementation plans from Claude Code or Codex with another coding agent, automatically rejecting low-quality plans with actionable feedback before you review.
 
 > *"Every plan deserves a second opinion."*
 
-When Claude presents an implementation plan, planman intercepts it, sends it to [OpenAI Codex CLI](https://github.com/openai/codex) for scoring, and rejects low-scoring plans with actionable feedback. Claude revises and re-presents. After a configurable number of rounds, you decide.
+When an agent presents an implementation plan, planman intercepts it, sends it to the configured evaluator for scoring, and rejects low-scoring plans with actionable feedback. By default, Claude Code plans are reviewed by Codex and Codex plans are reviewed by Claude Code. After a configurable number of rounds, you decide.
 
-**No API keys required** — uses your ChatGPT subscription via the `codex` CLI.
+**No API keys required for Codex review** — uses your ChatGPT subscription via the `codex` CLI. Claude review uses your local Claude Code CLI authentication.
 
 ## How It Works
 
@@ -26,7 +26,7 @@ Planman uses **two hooks** in a plan-mode-only architecture:
 PostToolUse(Write) — records plan file path when Claude writes to .claude/plans/
   │
   ▼
-PreToolUse(ExitPlanMode) — evaluates plan via codex when Claude exits plan mode
+PreToolUse(ExitPlanMode) — evaluates plan via configured evaluator when Claude exits plan mode
   │
   ├── Round 1: mandatory review — plan always gets scored feedback
   │     │
@@ -41,6 +41,7 @@ PreToolUse(ExitPlanMode) — evaluates plan via codex when Claude exits plan mod
 ```
 
 **Deterministic:** Files in `.claude/plans/` are always treated as plans — no LLM-based plan detection.
+For Codex-hosted sessions, planman uses Codex lifecycle hooks and evaluates only clearly plan-like content; if no plan is found, it fails open.
 
 ## Quick Start
 
@@ -54,9 +55,14 @@ PreToolUse(ExitPlanMode) — evaluates plan via codex when Claude exits plan mod
    /plugin marketplace add RusDyn/planman
    /plugin install planman@planman
    ```
-4. Restart Claude Code
+4. Or add planman to Codex:
+   ```bash
+   codex plugin marketplace add RusDyn/planman
+   codex plugin add planman@planman
+   ```
+5. Restart the host agent
 
-That's it. The next time Claude exits plan mode, planman evaluates the plan and blocks with feedback if the score is below threshold (default 7/10). Run `/planman:init` to customize settings.
+That's it. The next time the host agent presents a detected plan, planman evaluates it and blocks with feedback if the score is below threshold (default 7/10). Run `/planman:init` to customize settings.
 
 > *"You're four steps from better plans."*
 
@@ -77,6 +83,8 @@ That's it. The next time Claude exits plan mode, planman evaluates the plan and 
 
 ### From GitHub
 
+Claude Code:
+
 ```bash
 # Add the marketplace
 /plugin marketplace add RusDyn/planman
@@ -85,7 +93,16 @@ That's it. The next time Claude exits plan mode, planman evaluates the plan and 
 /plugin install planman@planman
 ```
 
+Codex:
+
+```bash
+codex plugin marketplace add RusDyn/planman
+codex plugin add planman@planman
+```
+
 ### Local Development
+
+Claude Code:
 
 ```bash
 # Add the local directory as a marketplace
@@ -95,28 +112,38 @@ That's it. The next time Claude exits plan mode, planman evaluates the plan and 
 /plugin install planman@planman
 ```
 
-Then restart Claude Code.
+Codex:
+
+```bash
+codex plugin marketplace add /path/to/planman
+codex plugin add planman@planman
+```
+
+Then restart the host agent.
 
 ## Configuration
 
-Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
+Settings are loaded from env vars (highest priority), `.planman.jsonc`, or legacy `.claude/planman.jsonc`:
 
 | Setting | Env Var | Default | Description |
 |---------|---------|---------|-------------|
 | `threshold` | `PLANMAN_THRESHOLD` | `7` | Minimum score (0-10) to pass; 0 = pass all |
 | `max_rounds` | `PLANMAN_MAX_ROUNDS` | `3` | Evaluation rounds before you decide (1-100) |
-| `model` | `PLANMAN_MODEL` | *(codex default)* | Override Codex model (`-m` flag) |
-| `fail_open` | `PLANMAN_FAIL_OPEN` | `true` | Pass through if Codex fails |
+| `model` | `PLANMAN_MODEL` | *(evaluator default)* | Override evaluator model |
+| `evaluator` | `PLANMAN_EVALUATOR` | `auto` | `auto`, `codex`, or `claude`; auto picks the other agent |
+| `codex_bin` | `PLANMAN_CODEX_BIN` | `codex` | Codex CLI binary/path |
+| `claude_bin` | `PLANMAN_CLAUDE_BIN` | `claude` | Claude Code CLI binary/path |
+| `fail_open` | `PLANMAN_FAIL_OPEN` | `true` | Pass through if evaluator fails |
 | `enabled` | `PLANMAN_ENABLED` | `true` | Master switch |
 | `custom_rubric` | `PLANMAN_RUBRIC` | *(built-in)* | Custom evaluation rubric |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
-| `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Codex verifies plan against actual source files |
+| `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Evaluator verifies plan against actual source files |
 | `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Stress-test rounds (`false`/`true`/number N) |
 | `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context injected into evaluation prompt |
 
-`stress_test` accepts `false` (off), `true` (1 round), or a number N (N stress-test rounds). Stress-test rounds skip Codex and auto-reject with the stress-test prompt. Codex evaluation begins at round N+1.
+`stress_test` accepts `false` (off), `true` (1 round), or a number N (N stress-test rounds). Stress-test rounds skip the external evaluator and auto-reject with the stress-test prompt. External evaluation begins at round N+1.
 
-Run `/planman:init` to generate `.claude/planman.jsonc` with all settings and inline documentation.
+Run `/planman:init` in Claude Code to generate `.planman.jsonc` with all settings and inline documentation. In Codex, create the same file manually or use `PLANMAN_*` environment variables.
 
 ## Scoring Rubric
 
@@ -140,7 +167,7 @@ Override the built-in rubric for domain-specific evaluation:
 export PLANMAN_RUBRIC="Score the plan focusing on security implications, test coverage, and backwards compatibility. Be strict about migration safety."
 ```
 
-Or in `.claude/planman.jsonc`:
+Or in `.planman.jsonc`:
 
 ```json
 {
@@ -150,13 +177,13 @@ Or in `.claude/planman.jsonc`:
 
 ## Commands
 
-All commands use the `planman:` namespace prefix:
+Claude Code slash commands use the `planman:` namespace prefix. Codex uses the installed Stop hook plus `.planman.jsonc` or `PLANMAN_*` environment variables.
 
 | Command | Description |
 |---------|-------------|
-| `/planman:status` | Show status, codex version, effective config |
+| `/planman:status` | Show status, evaluator versions, effective config |
 | `/planman:help` | Full usage guide |
-| `/planman:init` | Create `.claude/planman.jsonc` with all defaults |
+| `/planman:init` | Create `.planman.jsonc` with all defaults |
 | `/planman:clear` | Clear session state (reset evaluation rounds) |
 
 ## Multi-Round Behavior
@@ -168,10 +195,11 @@ All commands use the `planman:` namespace prefix:
 
 ## Zero Friction Design
 
-- **No API keys** — uses ChatGPT subscription via `codex` CLI
+- **Cross-agent by default** — Claude plans use Codex review; Codex plans use Claude review
+- **No API keys for Codex review** — uses ChatGPT subscription via `codex` CLI
 - **No pip dependencies** — stdlib only (Python 3.8+)
-- **Fail-open by default** — Codex errors never block your workflow
-- **Auto-detect codex** — if `codex` isn't installed, hook silently passes through
+- **Fail-open by default** — evaluator errors never block your workflow
+- **Auto-detect evaluator** — if the resolved evaluator CLI isn't installed, hook silently passes through
 - **Plan-mode only** — deterministic detection via `.claude/plans/` path
 
 ## State Files
@@ -183,19 +211,22 @@ Session state is stored in the system temp directory (run `python3 -c "import te
 
 ## Plugin Structure
 
-- `.claude-plugin/marketplace.json` — marketplace registry (used by `/plugin marketplace add`)
-- `.claude-plugin/plugin.json` — plugin definition (hooks, commands, schemas)
-- `hooks/hooks.json` — two hooks: PostToolUse(Write) + PreToolUse(ExitPlanMode)
+- `.claude-plugin/marketplace.json` — Claude Code marketplace registry
+- `.claude-plugin/plugin.json` — Claude Code plugin definition
+- `.codex-plugin/plugin.json` — Codex plugin definition
+- `.agents/plugins/marketplace.json` — Codex marketplace registry
+- `hooks/hooks.json` — Claude Code hooks: PostToolUse(Write) + PreToolUse(ExitPlanMode)
+- `hooks.json` — Codex Stop hook
 - `scripts/` — hook implementation (Python, stdlib only)
   - `post_tool_hook.py` — records plan file path
-  - `pre_exit_plan_hook.py` — evaluates plan via codex
+  - `pre_exit_plan_hook.py` — evaluates plan via configured evaluator
   - `hook_utils.py` — shared evaluation logic
-  - `evaluator.py` — codex subprocess wrapper
+  - `evaluator.py` — evaluator subprocess wrappers
   - `state.py` — multi-round session state
   - `config.py` — configuration loader
   - `clear_state.py` — session cleanup utility
-- `schemas/` — JSON output schema for codex structured output
-- `commands/` — slash commands (`/planman:status`, `/planman:help`, `/planman:init`, `/planman:clear`)
+- `schemas/` — JSON output schema for structured evaluator output
+- `commands/` — Claude Code slash commands (`/planman:status`, `/planman:help`, `/planman:init`, `/planman:clear`)
 
 ## Uninstalling
 
@@ -203,14 +234,14 @@ Session state is stored in the system temp directory (run `python3 -c "import te
 /plugin uninstall planman@planman
 ```
 
-This removes planman's hooks and commands. Your `.claude/planman.jsonc` config file is preserved — delete it manually if no longer needed.
+This removes planman's hooks and commands. Your `.planman.jsonc` or legacy `.claude/planman.jsonc` config file is preserved — delete it manually if no longer needed.
 
 ## Troubleshooting
 
 ### "Nothing happens" when Claude presents a plan
 
 1. **Check planman is installed**: Run `/planman:status` — it should show status and config
-2. **Enable verbose mode**: Set `PLANMAN_VERBOSE=true` in your env or `.claude/planman.jsonc`
+2. **Enable verbose mode**: Set `PLANMAN_VERBOSE=true` in your env or `.planman.jsonc`
 3. **Check threshold**: A threshold of `0` disables evaluation. Set `PLANMAN_THRESHOLD=1` for testing
 
 ### I set `PLANMAN_VERBOSE=true` but see no output

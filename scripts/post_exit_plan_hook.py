@@ -31,6 +31,9 @@ from state import clear_state
 
 
 def _main():
+    if os.environ.get("_PLANMAN_EVALUATOR"):
+        sys.exit(0)
+
     try:
         raw = sys.stdin.read()
     except Exception:

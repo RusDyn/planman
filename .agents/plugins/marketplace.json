@@ -1,0 +1,20 @@
+{
+  "name": "planman",
+  "interface": {
+    "displayName": "Planman"
+  },
+  "plugins": [
+    {
+      "name": "planman",
+      "source": {
+        "source": "local",
+        "path": "./plugins/planman"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

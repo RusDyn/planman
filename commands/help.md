@@ -10,43 +10,46 @@ Show the user the following help information:
 
 ## What is Planman?
 
-Planman is a Claude Code plugin that evaluates your implementation plans before you approve them. It uses **OpenAI Codex CLI** as an external evaluator — when Claude exits plan mode, Planman intercepts the ExitPlanMode call, sends the plan to Codex for scoring, and rejects low-scoring plans with actionable feedback. Claude then revises and re-presents. After a configurable number of rounds, you decide.
+Planman evaluates AI coding-agent implementation plans before you approve them. By default it uses cross-agent review: Claude Code plans are reviewed by Codex, and Codex plans are reviewed by Claude Code. Low-scoring plans are rejected with actionable feedback. After a configurable number of rounds, you decide.
 
 ## Prerequisites
 
-1. **OpenAI Codex CLI**: `npm install -g @openai/codex`
-2. **ChatGPT subscription** (Plus, Pro, or Team)
-3. **Login once**: Run `codex` and authenticate via browser
+1. **OpenAI Codex CLI** for Codex review: `npm install -g @openai/codex`
+2. **Claude Code CLI** for Claude review
+3. Authenticate the evaluator CLI you intend to use
 
-No API keys needed — Codex uses your ChatGPT subscription.
+No API keys are needed for Codex review — Codex uses your ChatGPT subscription. Claude review uses your local Claude Code authentication.
 
 ## How It Works
 
-1. Claude writes a plan to `.claude/plans/` (PostToolUse(Write) records the path)
-2. Claude calls ExitPlanMode to present the plan
-3. Planman intercepts ExitPlanMode and sends the plan to `codex exec` for evaluation
-4. Codex scores the plan on 5 criteria (completeness, correctness, sequencing, risk awareness, clarity)
+1. The host agent produces a plan
+2. Planman detects the host automatically
+3. Planman sends the plan to the resolved evaluator (`auto`, `codex`, or `claude`)
+4. The evaluator scores the plan on 5 criteria (completeness, correctness, sequencing, risk awareness, clarity)
 5. **Round 1**: Mandatory review — plan always gets scored feedback, regardless of score
-6. **Round 2+**: Score >= threshold (default 7/10) → plan passes. Below → rejected with feedback, Claude revises
+6. **Round 2+**: Score >= threshold (default 7/10) → plan passes. Below → rejected with feedback, the host agent revises
 7. After max rounds (default 3): You decide whether to proceed
 
-**Plan-mode only.** Files in `.claude/plans/` are deterministically treated as plans — no LLM-based detection.
+Claude Code files in `.claude/plans/` are deterministically treated as plans. Codex-hosted sessions evaluate only clearly plan-like content and fail open if no plan is found.
 
 ## Configuration
 
-Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
+Settings are loaded from env vars (highest priority), `.planman.jsonc`, or legacy `.claude/planman.jsonc`:
 
 | Setting | Env Var | Default | Description |
 |---------|---------|---------|-------------|
 | `threshold` | `PLANMAN_THRESHOLD` | `7` | Minimum score (1-10) to pass |
 | `max_rounds` | `PLANMAN_MAX_ROUNDS` | `3` | Rounds before you decide |
 | `min_rounds` | `PLANMAN_MIN_ROUNDS` | `0` | Minimum rounds before plan can pass |
-| `model` | `PLANMAN_MODEL` | *(codex default)* | Override Codex model |
-| `fail_open` | `PLANMAN_FAIL_OPEN` | `true` | Pass if Codex fails |
+| `model` | `PLANMAN_MODEL` | *(evaluator default)* | Override evaluator model |
+| `evaluator` | `PLANMAN_EVALUATOR` | `auto` | `auto`, `codex`, or `claude` |
+| `codex_bin` | `PLANMAN_CODEX_BIN` | `codex` | Codex CLI binary/path |
+| `claude_bin` | `PLANMAN_CLAUDE_BIN` | `claude` | Claude Code CLI binary/path |
+| `fail_open` | `PLANMAN_FAIL_OPEN` | `true` | Pass if evaluator fails |
 | `enabled` | `PLANMAN_ENABLED` | `true` | Master switch |
 | `custom_rubric` | `PLANMAN_RUBRIC` | *(built-in)* | Custom evaluation rubric |
 | `verbose` | `PLANMAN_VERBOSE` | `false` | Debug output to stderr |
-| `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Codex verifies plan against actual source files |
+| `source_verify` | `PLANMAN_SOURCE_VERIFY` | `true` | Evaluator verifies plan against actual source files |
 | `stress_test` | `PLANMAN_STRESS_TEST` | `false` | Stress-test rounds (`false`/`true`/number N) |
 | `context` | `PLANMAN_CONTEXT` | *(empty)* | Project context for evaluator |
 | `plan_dirs` | `PLANMAN_PLAN_DIRS` | `[]` | Additional plan directories to monitor |
@@ -55,9 +58,9 @@ Settings are loaded from env vars (highest priority) or `.claude/planman.jsonc`:
 
 ### Quick Start
 
-Run `/planman:init` to create `.claude/planman.jsonc` with all settings and descriptions.
+Run `/planman:init` in Claude Code to create `.planman.jsonc` with all settings and descriptions. In Codex, create the same file manually or use `PLANMAN_*` environment variables.
 
-### Example `.claude/planman.jsonc`
+### Example `.planman.jsonc`
 
 ```jsonc
 {
@@ -68,7 +71,7 @@ Run `/planman:init` to create `.claude/planman.jsonc` with all settings and desc
 }
 ```
 
-`stress_test` accepts `false` (off), `true` (1 round), or a number N (N stress-test rounds). Stress-test rounds skip Codex and auto-reject with the stress-test prompt. Codex evaluation begins at round N+1.
+`stress_test` accepts `false` (off), `true` (1 round), or a number N (N stress-test rounds). Stress-test rounds skip the evaluator and auto-reject with the stress-test prompt. External evaluation begins at round N+1.
 
 ## Tips
 
@@ -101,7 +104,9 @@ Env vars accept comma-separated values or JSON arrays: `PLANMAN_EXEC_PATTERNS='[
 
 ## Commands
 
+These are Claude Code slash commands. Codex uses the installed Stop hook plus `.planman.jsonc` or `PLANMAN_*` environment variables.
+
 - `/planman:status` — Show status and effective configuration
 - `/planman:help` — This help page
-- `/planman:init` — Create `.claude/planman.jsonc` with all defaults
+- `/planman:init` — Create `.planman.jsonc` with all defaults
 - `/planman:clear` — Clear session state (reset evaluation rounds)

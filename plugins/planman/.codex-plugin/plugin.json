@@ -1,0 +1,24 @@
+{
+  "name": "planman",
+  "version": "0.4.9",
+  "description": "Evaluates AI coding-agent plans using another agent",
+  "author": { "name": "dyn" },
+  "license": "MIT",
+  "keywords": ["plan", "evaluation", "quality-gate", "codex", "claude"],
+  "homepage": "https://github.com/RusDyn/planman",
+  "repository": "https://github.com/RusDyn/planman",
+  "interface": {
+    "displayName": "Planman",
+    "shortDescription": "Evaluates coding-agent plans before execution",
+    "longDescription": "Planman evaluates implementation plans from Codex or Claude Code with another local coding-agent CLI and blocks weak plans with actionable feedback.",
+    "developerName": "dyn",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Interactive"],
+    "defaultPrompt": [
+      "Evaluate my implementation plan",
+      "Stress-test this coding plan",
+      "Show planman status"
+    ],
+    "brandColor": "#2563EB"
+  }
+}
