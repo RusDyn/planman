@@ -1,0 +1,17 @@
+{
+  "description": "Evaluates Codex plans using another agent",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./scripts/codex_stop_hook.py",
+            "timeout": 600,
+            "statusMessage": "Evaluating plan"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -121,6 +121,23 @@ class TestEnvOverrides(unittest.TestCase):
         cfg = load_config()
         self.assertEqual(cfg.model, "gpt-4o")
 
+    def test_evaluator_override(self):
+        os.environ["PLANMAN_EVALUATOR"] = "claude"
+        cfg = load_config()
+        self.assertEqual(cfg.evaluator, "claude")
+
+    def test_invalid_evaluator_falls_back_to_auto(self):
+        os.environ["PLANMAN_EVALUATOR"] = "self"
+        cfg = load_config()
+        self.assertEqual(cfg.evaluator, "auto")
+
+    def test_evaluator_bins_override(self):
+        os.environ["PLANMAN_CODEX_BIN"] = "/opt/bin/codex"
+        os.environ["PLANMAN_CLAUDE_BIN"] = "/opt/bin/claude"
+        cfg = load_config()
+        self.assertEqual(cfg.codex_bin, "/opt/bin/codex")
+        self.assertEqual(cfg.claude_bin, "/opt/bin/claude")
+
     def test_verbose_true(self):
         os.environ["PLANMAN_VERBOSE"] = "1"
         cfg = load_config()
@@ -152,12 +169,28 @@ class TestFileConfig(unittest.TestCase):
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_file_config_loads(self):
+        with open(".planman.jsonc", "w") as f:
+            json.dump({"threshold": 8, "max_rounds": 5}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.threshold, 8)
+        self.assertEqual(cfg.max_rounds, 5)
+
+    def test_legacy_claude_file_config_loads(self):
         os.makedirs(".claude", exist_ok=True)
         with open(".claude/planman.jsonc", "w") as f:
             json.dump({"threshold": 8, "max_rounds": 5}, f)
         cfg = load_config()
         self.assertEqual(cfg.threshold, 8)
         self.assertEqual(cfg.max_rounds, 5)
+
+    def test_neutral_config_takes_priority_over_legacy_claude_config(self):
+        with open(".planman.jsonc", "w") as f:
+            json.dump({"threshold": 6}, f)
+        os.makedirs(".claude", exist_ok=True)
+        with open(".claude/planman.jsonc", "w") as f:
+            json.dump({"threshold": 9}, f)
+        cfg = load_config()
+        self.assertEqual(cfg.threshold, 6)
 
     def test_env_overrides_file(self):
         os.makedirs(".claude", exist_ok=True)
@@ -190,18 +223,16 @@ class TestFileConfig(unittest.TestCase):
 
     def test_json_fallback(self):
         """planman.json is loaded if planman.jsonc doesn't exist."""
-        os.makedirs(".claude", exist_ok=True)
-        with open(".claude/planman.json", "w") as f:
+        with open(".planman.json", "w") as f:
             json.dump({"threshold": 6}, f)
         cfg = load_config()
         self.assertEqual(cfg.threshold, 6)
 
     def test_jsonc_takes_priority_over_json(self):
         """planman.jsonc is preferred when both exist."""
-        os.makedirs(".claude", exist_ok=True)
-        with open(".claude/planman.jsonc", "w") as f:
+        with open(".planman.jsonc", "w") as f:
             json.dump({"threshold": 9}, f)
-        with open(".claude/planman.json", "w") as f:
+        with open(".planman.json", "w") as f:
             json.dump({"threshold": 4}, f)
         cfg = load_config()
         self.assertEqual(cfg.threshold, 9)

@@ -2,7 +2,7 @@
 description: Clear planman session state (reset evaluation rounds)
 ---
 Clear all planman session state files by running:
-`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/clear_state.py`
+`python3 -c "import os, subprocess; root = os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('CODEX_PLUGIN_ROOT') or os.getcwd(); subprocess.run(['python3', os.path.join(root, 'scripts', 'clear_state.py')])"`
 
 ## What Gets Cleared
 

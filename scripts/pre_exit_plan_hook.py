@@ -26,7 +26,7 @@ if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 
 from config import load_config
-from evaluator import check_codex_installed
+from evaluator import check_evaluator_installed
 from hook_utils import find_plan_file, log, run_evaluation, safe_session_id
 
 
@@ -57,6 +57,10 @@ def _output_allow(system_message=None):
 
 
 def _main():
+    if os.environ.get("_PLANMAN_EVALUATOR"):
+        _output_allow()
+        return
+
     # Read hook input from stdin
     try:
         raw = sys.stdin.read()
@@ -81,8 +85,8 @@ def _main():
         _output_allow()
         return
 
-    if not check_codex_installed():
-        log("codex CLI not installed — passing through", config, cwd)
+    if not check_evaluator_installed(config, host="claude"):
+        log("evaluator CLI not installed — passing through", config, cwd)
         _output_allow()
         return
 
@@ -106,7 +110,7 @@ def _main():
 
     # Run evaluation
     result = run_evaluation(
-        plan_text, session_id, config, cwd=cwd, plan_path=plan_path
+        plan_text, session_id, config, cwd=cwd, plan_path=plan_path, host="claude"
     )
 
     action = result["action"]

@@ -74,6 +74,9 @@ def _write_marker(file_path, session_id):
 
 
 def _main():
+    if os.environ.get("_PLANMAN_EVALUATOR"):
+        sys.exit(0)
+
     # Read hook input from stdin
     try:
         raw = sys.stdin.read()

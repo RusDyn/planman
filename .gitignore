@@ -8,16 +8,16 @@ build/
 .env
 
 # Claude Code local state
-.claude/planman.log
-.claude/plans/
-.claude/settings.local.json
+.claude/
 
 # Playwright MCP auto-generated logs
 .playwright-mcp/
 
 # Benchmark data (large/ephemeral)
-benchmark/exercises/
-benchmark/results/
-benchmark/swebench/results/
 logs/
 planman-*.json
+submission
+benchmark/
+test_*.log
+.omc/
+sb-cli-reports/

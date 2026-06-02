@@ -83,6 +83,10 @@ def _get_patterns_for_tool(tool_name, config):
 
 
 def _main():
+    if os.environ.get("_PLANMAN_EVALUATOR"):
+        _fast_exit_allow()
+        return
+
     # Read stdin
     try:
         raw = sys.stdin.read()
@@ -142,12 +146,12 @@ def _main():
 
     # ── Evaluation path: pattern matched ──
     from hook_utils import find_plan_file, log, run_evaluation
-    from evaluator import check_codex_installed
+    from evaluator import check_evaluator_installed
 
     log(f"exec gate: {tool_name} pattern matched, text={matchable!r}", config, cwd)
 
-    if not check_codex_installed():
-        log("codex CLI not installed — allowing", config, cwd)
+    if not check_evaluator_installed(config, host="claude"):
+        log("evaluator CLI not installed — allowing", config, cwd)
         _output_allow()
         return
 
@@ -173,7 +177,7 @@ def _main():
     log(f"evaluating plan from {plan_path} before exec (session={session_id})", config, cwd)
 
     result = run_evaluation(
-        plan_text, session_id, config, cwd=cwd, plan_path=plan_path
+        plan_text, session_id, config, cwd=cwd, plan_path=plan_path, host="claude"
     )
 
     action = result["action"]
